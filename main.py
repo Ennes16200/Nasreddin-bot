@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+import tweepy#!/usr/bin/env python3
 import os
 import json
 import random
@@ -63,11 +63,34 @@ class ChatResponse(BaseModel):
 
 # ─── Bot Uygulaması ─────────────────────────────────────────────────────────
 class NasreddinBot:
+        # Twitter'a bağlanma ayarı
+    def get_twitter_client(self):
+        return tweepy.Client(
+            consumer_key=os.environ.get("TWITTER_API_KEY"),
+            consumer_secret=os.environ.get("TWITTER_API_SECRET"),
+            access_token=os.environ.get("TWITTER_ACCESS_TOKEN"),
+            access_token_secret=os.environ.get("TWITTER_ACCESS_SECRET")
+        )
+
+    # Tweet atma komutu (Telegram için)
+    async def tweet_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        tweet_text = " ".join(context.args)
+        if not tweet_text:
+            await update.message.reply_text("Hocam, ne yazacağımı söylemedin! Örn: /tweet Selam!")
+            return
+        
+        try:
+            client = self.get_twitter_client()
+            client.create_tweet(text=tweet_text)
+            await update.message.reply_text("Tweet başarıyla atıldı, hayırlı olsun!")
+        except Exception as e:
+            await update.message.reply_text(f"Bir hata çıktı: {e}")
     def __init__(self):
         self.app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
         self._setup_handlers()
 
     def _setup_handlers(self):
+        self.app.add_handler(CommandHandler("tweet", self.tweet_command))
         self.app.add_handler(CommandHandler("start", self.start_command))
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
 
