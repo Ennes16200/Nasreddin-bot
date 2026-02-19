@@ -36,22 +36,9 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 DATA_DIR = Path("./data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-BRIEFING_FILE = DATA_DIR / "briefing_users.json"
-ALARMS_FILE = DATA_DIR / "alarms.json"
-TR_TZ = timezone(timedelta(hours=3))
-
-openai_client = OpenAI()
-
-# ─── Bot Mantığı (Önceki versiyondan aktarılanlar) ───────────────────────────
-# (Fıkralar, API çağrıları, Sistem Prompt vb. buraya gelecek)
-# Not: Kodun kısalığı için fıkralar listesini burada özetliyorum ama tam dosyada hepsi olacak.
-
 SYSTEM_PROMPT = "Sen Nasreddin Hoca'sın. Samimi, bilge ve komik bir Türk AI ajanı."
 
-FIKRALAR = [
-    {"baslik": "Kazan Doğurdu", "fikra": "Hoca kazanı geri verirken içine tencere koymuş..."},
-    # ... (Diğer 34 fıkra burada yer alacak)
-]
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 # ─── FastAPI Modelleri ──────────────────────────────────────────────────────
 class ChatRequest(BaseModel):
@@ -64,20 +51,33 @@ class ChatResponse(BaseModel):
 
 # ─── Bot Uygulaması ─────────────────────────────────────────────────────────
 class NasreddinBot:
-        # Twitter'a bağlanma ayarı
-        def get_twitter_client(self):
+    def __init__(self):
+        self.app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+        self._setup_handlers()
+
+    def _setup_handlers(self):
+        # Komut sıralaması önemli
+        self.app.add_handler(CommandHandler("start", self.start_command))
+        self.app.add_handler(CommandHandler("tweet", self.tweet_command))
+        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+
+    def get_twitter_client(self):
         api_key = os.environ.get("TWITTER_API_KEY")
         if not api_key:
             logger.error("Twitter API anahtarları Render'da tanımlı değil!")
             return None
-        return tweepy.Client(
-            consumer_key=api_key,
-            consumer_secret=os.environ.get("TWITTER_API_SECRET"),
-            access_token=os.environ.get("TWITTER_ACCESS_TOKEN"),
-            access_token_secret=os.environ.get("TWITTER_ACCESS_SECRET")
-        )
-        # Tweet atma komutu (Telegram için)
-        async def tweet_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        try:
+            return tweepy.Client(
+                consumer_key=api_key,
+                consumer_secret=os.environ.get("TWITTER_API_SECRET"),
+                access_token=os.environ.get("TWITTER_ACCESS_TOKEN"),
+                access_token_secret=os.environ.get("TWITTER_ACCESS_SECRET")
+            )
+        except Exception as e:
+            logger.error(f"Twitter Client hatası: {e}")
+            return None
+
+    async def tweet_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         tweet_text = " ".join(context.args)
         if not tweet_text:
             await update.message.reply_text("Hocam, ne yazacağımı söylemedin! Örn: /tweet Selam!")
@@ -85,45 +85,42 @@ class NasreddinBot:
         
         try:
             client = self.get_twitter_client()
-            client.create_tweet(text=tweet_text)
-            await update.message.reply_text("Tweet başarıyla atıldı, hayırlı olsun!")
+            if client:
+                client.create_tweet(text=tweet_text)
+                await update.message.reply_text("Tweet başarıyla atıldı, hayırlı olsun!")
+            else:
+                await update.message.reply_text("Twitter anahtarları eksik veya hatalı!")
         except Exception as e:
             await update.message.reply_text(f"Bir hata çıktı: {e}")
-    def __init__(self):
-        self.app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-        self._setup_handlers()
-
-    def _setup_handlers(self):
-        self.app.add_handler(CommandHandler("tweet", self.tweet_command))
-        self.app.add_handler(CommandHandler("start", self.start_command))
-        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Selamünaleyküm hemşerim! Ben Nasreddin.")
+        await update.message.reply_text("Selamünaleyküm hemşerim! Ben Nasreddin. Tweet atmak için /tweet yazabilirsin.")
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # AI Yanıt mantığı
-        pass
+        user_msg = update.message.text
+        reply = await self.get_ai_reply(user_msg)
+        await update.message.reply_text(reply)
 
     async def get_ai_reply(self, message: str) -> str:
-        response = openai_client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": message}]
-        )
-        return response.choices[0].message.content
+        try:
+            response = openai_client.chat.completions.create(
+                model="gpt-3.5-turbo", # gpt-4.1-mini yerine daha stabil bir model
+                messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": message}]
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"Kusura bakma, kafam biraz karıştı: {e}"
 
 nasreddin = NasreddinBot()
 
 # ─── FastAPI Entegrasyonu ───────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Botu arka planda başlat
-    asyncio.create_task(nasreddin.app.initialize())
-    asyncio.create_task(nasreddin.app.start())
-    asyncio.create_task(nasreddin.app.updater.start_polling())
-    logger.info("Telegram bot polling started via FastAPI lifespan")
+    await nasreddin.app.initialize()
+    await nasreddin.app.start()
+    await nasreddin.app.updater.start_polling()
+    logger.info("Telegram bot polling started")
     yield
-    # Kapatma işlemleri
     await nasreddin.app.updater.stop()
     await nasreddin.app.stop()
     await nasreddin.app.shutdown()
@@ -132,12 +129,7 @@ api = FastAPI(title="Nasreddin Hoca API", lifespan=lifespan)
 
 @api.get("/")
 async def root():
-    return {
-        "name": "Nasreddin Hoca AI Bot",
-        "description": "Samimi, bilge ve komik Türk AI ajanı",
-        "status": "active",
-        "version": "2.1"
-    }
+    return {"status": "active", "bot": "Nasreddin Hoca"}
 
 @api.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
