@@ -104,7 +104,7 @@ class NasreddinBot:
     async def get_ai_reply(self, message: str) -> str:
         try:
             response = openai_client.chat.completions.create(
-                model="gpt-3.5-turbo", # gpt-4.1-mini yerine daha stabil bir model
+                model="gpt-4o-mini", # gpt-4.1-mini yerine daha stabil bir model
                 messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": message}]
             )
             return response.choices[0].message.content
