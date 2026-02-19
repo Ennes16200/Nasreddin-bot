@@ -1,4 +1,5 @@
-import tweepy#!/usr/bin/env python3
+#!/usr/bin/env python3
+import tweepy
 import os
 import json
 import random
