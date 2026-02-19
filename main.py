@@ -65,14 +65,18 @@ class ChatResponse(BaseModel):
 # ─── Bot Uygulaması ─────────────────────────────────────────────────────────
 class NasreddinBot:
         # Twitter'a bağlanma ayarı
-    def get_twitter_client(self):
+        def get_twitter_client(self):
+        api_key = os.environ.get("TWITTER_API_KEY")
+        if not api_key:
+            logger.error("Twitter API anahtarları Render'da tanımlı değil!")
+            return None
         return tweepy.Client(
-            consumer_key=os.environ.get("TWITTER_API_KEY"),
+            consumer_key=api_key,
             consumer_secret=os.environ.get("TWITTER_API_SECRET"),
             access_token=os.environ.get("TWITTER_ACCESS_TOKEN"),
             access_token_secret=os.environ.get("TWITTER_ACCESS_SECRET")
-        )
-
+            
+)
     # Tweet atma komutu (Telegram için)
     async def tweet_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         tweet_text = " ".join(context.args)
