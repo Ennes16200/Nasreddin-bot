@@ -76,8 +76,8 @@ class NasreddinBot:
             access_token=os.environ.get("TWITTER_ACCESS_TOKEN"),
             access_token_secret=os.environ.get("TWITTER_ACCESS_SECRET")
         )
-    # Tweet atma komutu (Telegram için)
-    async def tweet_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # Tweet atma komutu (Telegram için)
+        async def tweet_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         tweet_text = " ".join(context.args)
         if not tweet_text:
             await update.message.reply_text("Hocam, ne yazacağımı söylemedin! Örn: /tweet Selam!")
