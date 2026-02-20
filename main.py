@@ -17,8 +17,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================= AI SETUP =================
-
-client = OpenAI(api_key="OPENAI_API_KEY")
+import os
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 PERSONA = """
 Sen Nasreddin Hoca ruhuna sahip,
