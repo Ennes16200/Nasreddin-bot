@@ -10,14 +10,13 @@ import tweepy
 from datetime import datetime, timedelta
 from openai import OpenAI
 
-# ========= LOG =========
-logging.basicConfig(level=logging.INFO)
+# ========= LOG YAPILANDIRMASI =========
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ========= AI Client =========
+# ========= API İSTEMCİLERİ =========
 client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ========= TWITTER =========
 twitter = tweepy.Client(
     bearer_token=os.getenv("TWITTER_BEARER"),
     consumer_key=os.getenv("TWITTER_API_KEY"),
@@ -26,135 +25,127 @@ twitter = tweepy.Client(
     access_token_secret=os.getenv("TWITTER_ACCESS_SECRET"),
 )
 
-# ========= NFT COLLECTIONS =========
-COLLECTIONS = [
-    "boredapeyachtclub",
-    "azuki",
-    "doodles-official",
-    "pudgypenguins"
-]
+# ========= AYARLAR =========
+COLLECTIONS = ["boredapeyachtclub", "azuki", "pudgypenguins"]
 
-# ========= AGENT CLASS =========
-class NFTAgent:
+class KriptoHocaAgent:
     def __init__(self, name="KriptoHoca"):
         self.name = name
-        self.memory = []
         self.tweet_times = []
-        self.TWEET_LIMIT_PER_HOUR = 10
+        self.TWEET_LIMIT_PER_HOUR = 5
 
-    # --- NFT FLOOR & VOLUME ---
-    def get_nft_data(self):
+    # --- GÜVENLİK MÜFETTİŞİ (GoPlus API) ---
+    def check_security(self, chain_id, contract_address):
+        """
+        Yeni projenin kontratını tarar. 
+        chain_id: 1 (ETH), 56 (BSC), 137 (Polygon), 8453 (Base)
+        """
         try:
-            slug = random.choice(COLLECTIONS)
-            url = f"https://api.opensea.io/api/v2/collections/{slug}/stats"
-            r = requests.get(url)
-            data = r.json()
-            floor = data["stats"]["floor_price"]
-            volume = data["stats"]["total_volume"]
-            return slug, floor, volume
+            url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={contract_address}"
+            res = requests.get(url, timeout=10).json()
+            if res.get("code") == 1:
+                data = res["result"][contract_address.lower()]
+                
+                risks = []
+                if data.get("is_honeypot") == "1": risks.append("BAL KÜPÜ (Honeypot) TUZAĞI! Parayı koyan geri alamaz.")
+                if data.get("is_mintable") == "1": risks.append("SINIRSIZ BASKI (Mintable)! Sahibi kafasına göre para basar.")
+                if data.get("cannot_buy") == "1" or data.get("cannot_sell") == "1": risks.append("ALIM-SATIM KİLİDİ! Kazan mühürlü.")
+                
+                if not risks:
+                    return "Sözleşme temiz görünüyor, ama yine de eşeği sağlam kazığa bağlayın."
+                return " | ".join(risks)
         except:
-            slug = random.choice(COLLECTIONS)
-            floor = round(random.uniform(0.3,1.7),2)
-            volume = round(random.uniform(100,10000),0)
-            return slug, floor, volume
+            return "Sözleşme mühürlerini sökemedim, karanlık işler dönüyor olabilir."
+        return "İnceleme yapılamadı."
 
-    # --- WHALE ANALYZER ---
-    def whale_signal(self, volume):
-        score = 0
-        if volume > 5000:
-            score += 2
-        if random.random() > 0.7:
-            score += 1
-        signals = [
-            "balinalar sessizce topluyor",
-            "dump hazırlığı kokusu var",
-            "hacim köpürmüş gibi",
-            "likidite oyunları dönüyor"
-        ]
-        return score, random.choice(signals)
+    # --- PİYASA & TREND VERİSİ ---
+    def get_market_wisdom(self):
+        try:
+            # 1. Fiyatlar (Binance)
+            p_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbols=[\"BTCUSDT\",\"PAXGUSDT\"]").json()
+            btc = next(p['price'] for p in p_res if p['symbol'] == 'BTCUSDT')
+            gold = next(p['price'] for p in p_res if p['symbol'] == 'PAXGUSDT')
 
-    # --- TREND ENGINE ---
-    def trend_prediction(self, floor, whale_score):
-        trend = floor * random.uniform(0.8,1.2) + whale_score
-        if trend > 3:
-            return "Yükseliş ihtimali güçlü"
-        elif trend > 1.5:
-            return "Dalgalı ama umut var"
-        else:
-            return "Hoca eşeğe binmez bu piyasada"
+            # 2. Trend Projeler & Güvenlik Kontrolü (CoinGecko)
+            t_res = requests.get("https://api.coingecko.com/api/v3/search/trending").json()
+            top_coin = t_res['coins'][0]['item']
+            coin_name = top_coin['name']
+            
+            # Eğer kontrat adresi varsa güvenlik taraması yap (Örn: Ethereum ağı varsayılan)
+            # Not: Gerçek senaryoda ağ ID'si dinamik alınmalıdır.
+            security_report = "Yeni bir kazan doğmuş, henüz mühürlerini inceleyemedim."
+            # Bazı trend coinlerin kontrat adresleri API'den gelebilir, burada simüle ediyoruz:
+            # security_report = self.check_security("1", "0x...") 
+
+            # 3. Korku Endeksi
+            f_res = requests.get("https://api.alternative.me/fng/").json()
+            fng = f_res['data'][0]['value']
+            mood = f_res['data'][0]['value_classification']
+
+            return {
+                "btc": round(float(btc), 2),
+                "gold": round(float(gold), 2),
+                "trend": coin_name,
+                "security": security_report,
+                "mood": f"{mood} ({fng}/100)"
+            }
+        except Exception as e:
+            logger.error("Veri hatası: %s", e)
+            return None
 
     # --- AI TWEET GENERATOR ---
-    def generate_tweet(self):
-        slug, floor, volume = self.get_nft_data()
-        whale_score, whale_text = self.whale_signal(volume)
-        trend = self.trend_prediction(floor, whale_score)
+    def generate_wisdom_tweet(self):
+        wisdom = self.get_market_wisdom()
+        if not wisdom: return None
 
         prompt = f"""
-Sen Nasreddin Hoca ruhuna sahip kripto filozofu AI'sın.
-NFT Koleksiyon: {slug}
-Floor: {floor}
-Hacim: {volume}
-Whale analiz: {whale_text}
-Trend tahmini: {trend}
-Türk mizahı, zeka ve taşlama içeren tweet yaz. Max 260 karakter.
+Sen Nasreddin Hoca'sın. Elindeki veriler:
+- Bitcoin: {wisdom['btc']}$
+- Altın (PAXG): {wisdom['gold']}$
+- Yeni Proje: {wisdom['trend']}
+- Güvenlik Raporu: {wisdom['security']}
+- Piyasa Hissi: {wisdom['mood']}
+
+Görev:
+Bu verileri kullanarak; içinde 'Kazan doğurdu', 'Eşeğe ters binmek' veya 'Ya tutarsa' gibi bir fıkra teması olan, 
+yeni çıkan {wisdom['trend']} projesine ve güvenlik durumuna ({wisdom['security']}) mutlaka değinen, 
+kripto dünyasını iğneleyen bilgece ve komik bir Türkçe tweet yaz. Max 240 karakter.
 """
+        try:
+            response = client_ai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "system", "content": "Sen bilge ve mizahşör Nasreddin Hoca'sın."},
+                          {"role": "user", "content": prompt}]
+            )
+            return response.choices[0].message.content.strip()
+        except:
+            return None
 
-        self.memory.append({"role":"user","content":prompt})
-
-        response = client_ai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=self.memory,
-            max_completion_tokens=120
-        )
-
-        answer = response.choices[0].message.content.strip()
-        self.memory.append({"role":"assistant","content":answer})
-        return answer
-
-    # --- RATE LIMIT CHECK ---
-    def can_tweet(self):
+    # --- TWEET GÖNDER ---
+    def send_tweet(self, text):
         now = datetime.now()
         self.tweet_times = [t for t in self.tweet_times if now - t < timedelta(hours=1)]
-        if len(self.tweet_times) < self.TWEET_LIMIT_PER_HOUR:
-            self.tweet_times.append(now)
-            return True
-        return False
-
-    # --- SEND TWEET ---
-    def send_tweet(self, text):
-        if self.can_tweet():
+        
+        if text and len(self.tweet_times) < self.TWEET_LIMIT_PER_HOUR:
             try:
                 twitter.create_tweet(text=text)
-                logger.info("Tweet sent: %s", text)
+                self.tweet_times.append(now)
+                logger.info("Tweet Başarılı: %s", text)
             except Exception as e:
-                logger.error("Twitter fail: %s", e)
-        else:
-            logger.info("Rate limit reached, tweet skipped")
+                logger.error("Twitter Hatası: %s", e)
 
-    # --- MEMORY & WATCHDOG ---
-    def memory_guard(self):
-        import psutil
-        mem = psutil.Process(os.getpid()).memory_info().rss / 1024 /1024
-        if mem > 450:
-            logger.warning("Memory exceeded -> Restarting")
-            os._exit(1)
-
-    # --- MAIN LOOP ---
+    # --- ANA DÖNGÜ ---
     def run(self):
-        logger.info(f"{self.name} Agent STARTED")
+        logger.info("=== Hoca Piyasaya İndi! ===")
         while True:
-            try:
-                tweet_text = self.generate_tweet()
-                self.send_tweet(tweet_text)
-                self.memory_guard()
-                wait = random.randint(1800,7200)
-                logger.info(f"{wait} saniye bekleniyor")
-                time.sleep(wait)
-            except Exception as e:
-                logger.error("Crash caught: %s", e)
-                time.sleep(30)
+            tweet = self.generate_wisdom_tweet()
+            self.send_tweet(tweet)
+            
+            # 1-3 saat arası rastgele bekleme
+            wait = random.randint(3600, 10800)
+            logger.info(f"Hoca istirahate çekildi. {wait//60} dk sonra dönecek.")
+            time.sleep(wait)
 
-# ========= RUN AGENT =========
 if __name__ == "__main__":
-    agent = NFTAgent()
+    agent = KriptoHocaAgent()
     agent.run()
