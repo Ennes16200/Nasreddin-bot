@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 import tweepy
 import os
-import json
-import random
 import logging
 import asyncio
-from datetime import datetime, time, timezone, timedelta
-from pathlib import Path
-from contextlib import asynccontextmanager
-from apscheduler.schedulers.background import BackgroundScheduler
-import datetime
-
 import requests
+from datetime import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
+
 from openai import OpenAI
 from telegram import Update
 from telegram.ext import (
@@ -21,56 +16,47 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from fastapi import FastAPI, BackgroundTasks
-from pydantic import BaseModel
+from fastapi import FastAPI
+from contextlib import asynccontextmanager
 import uvicorn
 
-# ─── Logging ────────────────────────────────────────────────────────────────
+# ─── LOGGING AYARLARI ──────────────────────────────────────────────────────
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
-logger = logging.getLogger("NasreddinBot")
+logger = logging.getLogger("NasreddinAI_Agent")
 
-# ─── Config ─────────────────────────────────────────────────────────────────
+# ─── YAPILANDIRMA & API ANAHTARLARI ────────────────────────────────────────
+# Not: Bu anahtarları Render'da Environment Variables olarak tanımlamalısın.
 TELEGRAM_TOKEN = "8575076029:AAEX99Azv0APOSg6WGI3lod5sn0lJokF81w"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-DATA_DIR = Path("./data")
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-SYSTEM_PROMPT = "Sen Nasreddin Hoca'sın. Samimi, bilge ve komik bir Türk AI ajanı."
+SYSTEM_PROMPT = (
+    "Sen Nasreddin Hoca'sın. Samimi, bilge, iğneleyici ve çok komik bir Türk AI ajanımsın. "
+    "Kripto para piyasasını (Bitcoin, Ethereum vb.) bir köylü bilgeliğiyle yorumluyorsun. "
+    "Eşeğe ters binmek, kazan doğurması, göle maya çalmak gibi Nasreddin Hoca fıkralarına atıfta bulunursun."
+)
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# ─── FastAPI Modelleri ──────────────────────────────────────────────────────
-class ChatRequest(BaseModel):
-    message: str
-    user_id: str = "agent_scan_user"
+# ─── GLOBAL DEĞİŞKENLER (Fiyat Takibi İçin) ──────────────────────────────────
+last_checked_price = None
 
-class ChatResponse(BaseModel):
-    response: str
-    status: str = "success"
-
-# ─── Bot Uygulaması ─────────────────────────────────────────────────────────
+# ─── BOT SINIFI ─────────────────────────────────────────────────────────────
 class NasreddinBot:
     def __init__(self):
         self.app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
         self._setup_handlers()
 
     def _setup_handlers(self):
-        # Komut sıralaması önemli
         self.app.add_handler(CommandHandler("start", self.start_command))
         self.app.add_handler(CommandHandler("tweet", self.tweet_command))
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
 
     def get_twitter_client(self):
-        api_key = os.environ.get("TWITTER_API_KEY")
-        if not api_key:
-            logger.error("Twitter API anahtarları Render'da tanımlı değil!")
-            return None
         try:
             return tweepy.Client(
-                consumer_key=api_key,
+                consumer_key=os.environ.get("TWITTER_API_KEY"),
                 consumer_secret=os.environ.get("TWITTER_API_SECRET"),
                 access_token=os.environ.get("TWITTER_ACCESS_TOKEN"),
                 access_token_secret=os.environ.get("TWITTER_ACCESS_SECRET")
@@ -79,83 +65,117 @@ class NasreddinBot:
             logger.error(f"Twitter Client hatası: {e}")
             return None
 
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text("Selamünaleyküm ahali! Ben Nasreddin Hoca. Piyasayı izliyorum, eşeği sağlam kazığa bağladık! 🌙")
+
     async def tweet_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         tweet_text = " ".join(context.args)
         if not tweet_text:
-            await update.message.reply_text("Hocam, ne yazacağımı söylemedin! Örn: /tweet Selam!")
+            await update.message.reply_text("Hocam, ne yazacağımı söylemedin!")
             return
-        
-        try:
-            client = self.get_twitter_client()
-            if client:
-                client.create_tweet(text=tweet_text)
-                await update.message.reply_text("Tweet başarıyla atıldı, hayırlı olsun!")
-            else:
-                await update.message.reply_text("Twitter anahtarları eksik veya hatalı!")
-        except Exception as e:
-            await update.message.reply_text(f"Bir hata çıktı: {e}")
-
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Selamünaleyküm hemşerim! Ben Nasreddin. Tweet atmak için /tweet yazabilirsin.")
+        client = self.get_twitter_client()
+        if client:
+            client.create_tweet(text=tweet_text)
+            await update.message.reply_text("Tweet başarıyla atıldı! ✅")
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_msg = update.message.text
-        reply = await self.get_ai_reply(user_msg)
-        await update.message.reply_text(reply)
-
-    async def get_ai_reply(self, message: str) -> str:
         try:
             response = openai_client.chat.completions.create(
-                model="gpt-4o-mini", # gpt-4.1-mini yerine daha stabil bir model
-                messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": message}]
+                model="gpt-4o-mini",
+                messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": update.message.text}]
             )
-            return response.choices[0].message.content
+            await update.message.reply_text(response.choices[0].message.content)
         except Exception as e:
-            return f"Kusura bakma, kafam biraz karıştı: {e}"
+            await update.message.reply_text(f"Kafam karıştı evlat: {e}")
 
 nasreddin = NasreddinBot()
-# --- Zamanlanmış Görev Fonksiyonu ---
-def gunaydin_tweeti():
-    mesaj = "Günaydın Kripto Türk ailesi! ☀️ Nasreddin Hoca der ki: 'Kriptoda sabreden derviş, muradına ermiş.' #Bitcoin #Kripto"
+
+# ─── PİYASA & AI FONKSİYONLARI ──────────────────────────────────────────────
+
+def get_btc_price():
+    """Binance'den güncel BTC fiyatını çeker."""
     try:
-        # NasreddinBot sınıfındaki twitter client'ı alıyoruz
+        url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+        res = requests.get(url, timeout=10).json()
+        return float(res['price'])
+    except Exception as e:
+        logger.error(f"Fiyat çekme hatası: {e}")
+        return None
+
+async def send_ai_tweet(custom_prompt):
+    """AI'dan tweet metni alır ve Twitter'da paylaşır."""
+    # Hashtag kuralını prompt'a ekliyoruz
+    full_prompt = custom_prompt + " Tweetin sonuna mutlaka #Bitcoin #Kripto #NasreddinHoca etiketlerini ekle. Maksimum 280 karakter."
+    
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": full_prompt}]
+        )
+        tweet_text = response.choices[0].message.content.strip()
+        
         client = nasreddin.get_twitter_client()
         if client:
-            client.create_tweet(text=mesaj)
-            logger.info(f"Zamanlanmış tweet başarıyla atıldı: {mesaj}")
-        else:
-            logger.error("Zamanlanmış tweet için Twitter Client başlatılamadı!")
+            client.create_tweet(text=tweet_text)
+            logger.info(f"Tweet Atıldı: {tweet_text}")
     except Exception as e:
-        logger.error(f"Zamanlanmış tweet hatası: {e}")
+        logger.error(f"Tweet gönderme hatası: {e}")
 
-# --- Zamanlayıcıyı Başlat ---
+# ─── ZAMANLANMIŞ GÖREVLER (SCHEDULER JOBS) ──────────────────────────────────
+
+def job_scheduled_tweet():
+    """Sabah, öğle, akşam rutin tweetleri."""
+    price = get_btc_price()
+    price_str = f"Şu an Bitcoin ${price:,.0f}." if price else ""
+    prompt = f"{price_str} Günün bu saatinde piyasa hakkında bilgece ve komik bir yorum yap."
+    asyncio.run(send_ai_tweet(prompt))
+
+def job_price_movement_check():
+    """Sert fiyat hareketlerini kontrol eder (%2 ve üzeri)."""
+    global last_checked_price
+    current_price = get_btc_price()
+    
+    if current_price and last_checked_price:
+        change = ((current_price - last_checked_price) / last_checked_price) * 100
+        
+        if abs(change) >= 2.0: # %2 ve üzeri değişim
+            durum = "fırladı, kazan doğurdu! 🚀" if change > 0 else "çakıldı, kazan öldü! 📉"
+            prompt = f"Bitcoin fiyatı aniden %{abs(change):.1f} {durum} Şu an ${current_price:,.0f}. Çok şaşırmış veya heyecanlanmış bir Nasreddin Hoca tweeti yaz."
+            asyncio.run(send_ai_tweet(prompt))
+            
+    last_checked_price = current_price
+
+# ─── ZAMANLAYICI BAŞLATMA ───────────────────────────────────────────────────
 scheduler = BackgroundScheduler()
-# Türkiye saatiyle 09:00 (UTC 06:00) için ayar:
-scheduler.add_job(gunaydin_tweeti, 'cron', hour=6, minute=0)
+
+# 1. Rutin Tweetler (TSİ 09:00, 15:00, 21:00) - UTC saatleri kullanılmıştır
+scheduler.add_job(job_scheduled_tweet, 'cron', hour=6, minute=0)
+scheduler.add_job(job_scheduled_tweet, 'cron', hour=12, minute=0)
+scheduler.add_job(job_scheduled_tweet, 'cron', hour=18, minute=0)
+
+# 2. Fiyat Hareket Kontrolü (Her 15 dakikada bir)
+scheduler.add_job(job_price_movement_check, 'interval', minutes=15)
+
 scheduler.start()
-logger.info("Zamanlayıcı (Scheduler) başlatıldı, her sabah 09:00'da tweet atacak.")
-# ─── FastAPI Entegrasyonu ───────────────────────────────────────────────────
+
+# ─── FASTAPI & LIFESPAN ─────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Botu başlat
     await nasreddin.app.initialize()
     await nasreddin.app.start()
     await nasreddin.app.updater.start_polling()
-    logger.info("Telegram bot polling started")
+    logger.info("Nasreddin AI Ajanı Göreve Başladı!")
     yield
+    # Botu durdur
     await nasreddin.app.updater.stop()
     await nasreddin.app.stop()
-    await nasreddin.app.shutdown()
 
-api = FastAPI(title="Nasreddin Hoca API", lifespan=lifespan)
+api = FastAPI(lifespan=lifespan)
 
 @api.get("/")
 async def root():
-    return {"status": "active", "bot": "Nasreddin Hoca"}
-
-@api.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    reply = await nasreddin.get_ai_reply(request.message)
-    return ChatResponse(response=reply)
+    return {"status": "online", "character": "Nasreddin Hoca", "btc_price": get_btc_price()}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
