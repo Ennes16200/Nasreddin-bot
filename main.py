@@ -64,25 +64,46 @@ class KriptoHocaAgent:
             return "Sözleşme mühürlerini sökemedim."
         return "İnceleme yapılamadı."
 
-    def get_market_wisdom(self):
-        """Piyasa verilerini toplar."""
+        def get_market_wisdom(self):
+        """Piyasa verilerini toplar (Hata korumalı)."""
         try:
-            # Fiyatlar
-            btc = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()['price']
-            # Trendler
-            t_res = requests.get("https://api.coingecko.com/api/v3/search/trending").json()
-            top_coin = t_res['coins'][0]['item']
-            # Korku Endeksi
-            fng = requests.get("https://api.alternative.me/fng/").json()['data'][0]['value']
+            # 1. Fiyat Verisi (Binance alternatifi eklendi)
+            try:
+                btc_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10).json()
+                btc_price = btc_res.get('price', "0")
+            except:
+                # Binance hata verirse CoinGecko'dan dene
+                btc_res = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", timeout=10).json()
+                btc_price = btc_res.get('bitcoin', {}).get('usd', "0")
+
+            # 2. Trend Verisi
+            trend_name = "Piyasa durgun"
+            security_info = "İnceleme yapılamadı"
+            try:
+                t_res = requests.get("https://api.coingecko.com/api/v3/search/trending", timeout=10).json()
+                if 'coins' in t_res and len(t_res['coins']) > 0:
+                    top_coin = t_res['coins'][0]['item']
+                    trend_name = top_coin.get('name', "Bilinmeyen Coin")
+                    security_info = self.check_security("1", top_coin.get('native_slug', 'N/A'))
+            except:
+                logger.warning("Trend verisi alınamadı, varsayılan değerler kullanılıyor.")
+
+            # 3. Korku Endeksi
+            fng = "50"
+            try:
+                fng_res = requests.get("https://api.alternative.me/fng/", timeout=10).json()
+                fng = fng_res.get('data', [{}])[0].get('value', "50")
+            except:
+                logger.warning("Korku endeksi alınamadı.")
 
             return {
-                "btc": round(float(btc), 2),
-                "trend": top_coin['name'],
-                "security": self.check_security("1", top_coin.get('native_slug', 'N/A')),
+                "btc": round(float(btc_price), 2),
+                "trend": trend_name,
+                "security": security_info,
                 "fng": fng
             }
         except Exception as e:
-            logger.error(f"Veri toplama hatası: {e}")
+            logger.error(f"Veri toplama hatası (Genel): {e}")
             return None
 
     def generate_wisdom_tweet(self):
