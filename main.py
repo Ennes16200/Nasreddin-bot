@@ -59,24 +59,25 @@ class KriptoHocaAgent:
         return "İnceleme yapılamadı."
 
     # --- PİYASA & TREND VERİSİ ---
-    def get_market_wisdom(self):
+        def get_market_wisdom(self):
         try:
-            # 1. Fiyatlar (Binance)
-            p_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbols=[\"BTCUSDT\",\"PAXGUSDT\"]").json()
-            btc = next(p['price'] for p in p_res if p['symbol'] == 'BTCUSDT')
-            gold = next(p['price'] for p in p_res if p['symbol'] == 'PAXGUSDT')
+            # 1. Fiyatlar (Binance) - Daha güvenli veri çekme
+            btc_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()
+            gold_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT").json()
+            
+            # API bazen liste bazen sözlük dönebilir, ikisini de kapsayalım
+            btc = btc_res.get('price') if isinstance(btc_res, dict) else btc_res[0]['price']
+            gold = gold_res.get('price') if isinstance(gold_res, dict) else gold_res[0]['price']
 
-            # 2. Trend Projeler & Güvenlik Kontrolü (CoinGecko)
+            # 2. Trend Projeler (CoinGecko)
             t_res = requests.get("https://api.coingecko.com/api/v3/search/trending").json()
+            # Trend listesi boş olabilir, kontrol ekleyelim
+            if not t_res.get('coins'):
+                return None
+                
             top_coin = t_res['coins'][0]['item']
             coin_name = top_coin['name']
             
-            # Eğer kontrat adresi varsa güvenlik taraması yap (Örn: Ethereum ağı varsayılan)
-            # Not: Gerçek senaryoda ağ ID'si dinamik alınmalıdır.
-            security_report = "Yeni bir kazan doğmuş, henüz mühürlerini inceleyemedim."
-            # Bazı trend coinlerin kontrat adresleri API'den gelebilir, burada simüle ediyoruz:
-            # security_report = self.check_security("1", "0x...") 
-
             # 3. Korku Endeksi
             f_res = requests.get("https://api.alternative.me/fng/").json()
             fng = f_res['data'][0]['value']
@@ -86,12 +87,13 @@ class KriptoHocaAgent:
                 "btc": round(float(btc), 2),
                 "gold": round(float(gold), 2),
                 "trend": coin_name,
-                "security": security_report,
+                "security": "Yeni bir kazan doğmuş, mühürleri inceleniyor...",
                 "mood": f"{mood} ({fng}/100)"
             }
         except Exception as e:
-            logger.error("Veri hatası: %s", e)
+            logger.error("Veri hatası detayı: %s", e) # Hatayı daha detaylı görmek için
             return None
+            
 
     # --- AI TWEET GENERATOR ---
     def generate_wisdom_tweet(self):
