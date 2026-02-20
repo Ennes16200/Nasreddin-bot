@@ -8,6 +8,8 @@ import asyncio
 from datetime import datetime, time, timezone, timedelta
 from pathlib import Path
 from contextlib import asynccontextmanager
+from apscheduler.schedulers.background import BackgroundScheduler
+import datetime
 
 import requests
 from openai import OpenAI
@@ -112,7 +114,26 @@ class NasreddinBot:
             return f"Kusura bakma, kafam biraz karıştı: {e}"
 
 nasreddin = NasreddinBot()
+# --- Zamanlanmış Görev Fonksiyonu ---
+def gunaydin_tweeti():
+    mesaj = "Günaydın Kripto Türk ailesi! ☀️ Nasreddin Hoca der ki: 'Kriptoda sabreden derviş, muradına ermiş.' #Bitcoin #Kripto"
+    try:
+        # NasreddinBot sınıfındaki twitter client'ı alıyoruz
+        client = nasreddin.get_twitter_client()
+        if client:
+            client.create_tweet(text=mesaj)
+            logger.info(f"Zamanlanmış tweet başarıyla atıldı: {mesaj}")
+        else:
+            logger.error("Zamanlanmış tweet için Twitter Client başlatılamadı!")
+    except Exception as e:
+        logger.error(f"Zamanlanmış tweet hatası: {e}")
 
+# --- Zamanlayıcıyı Başlat ---
+scheduler = BackgroundScheduler()
+# Türkiye saatiyle 09:00 (UTC 06:00) için ayar:
+scheduler.add_job(gunaydin_tweeti, 'cron', hour=6, minute=0)
+scheduler.start()
+logger.info("Zamanlayıcı (Scheduler) başlatıldı, her sabah 09:00'da tweet atacak.")
 # ─── FastAPI Entegrasyonu ───────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
