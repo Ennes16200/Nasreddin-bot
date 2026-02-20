@@ -106,7 +106,7 @@ def run_bot():
         if tweet:
             send_tweet(tweet)
 
-        wait = random.randint(14400, 21600)  # 4-6 saat
+        wait = random.randint(5, 10)  # 4-6 saat
         logger.info(f"{wait} saniye bekleniyor...")
         time.sleep(wait)
 
