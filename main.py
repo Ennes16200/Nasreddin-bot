@@ -6,85 +6,140 @@ import time
 import random
 import logging
 from datetime import datetime
+from openai import OpenAI
 
-# --- LOGGING AYARLARI ---
+# ================= LOGGING =================
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("hoca_bot.log", encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-class NasreddinBot:
+# ================= AI SETUP =================
+
+client = OpenAI(api_key="OPENAI_API_KEY")
+
+PERSONA = """
+Sen Nasreddin Hoca ruhuna sahip,
+kripto bilen,
+NFT projelerini yorumlayan,
+Türk mizahını kullanan,
+absürt ama zeki,
+viral tweet yazabilen bir AI karakterisin.
+
+Kurallar:
+- Mizah kullan
+- Punchline ile bitir
+- Kripto jargon bil
+- NFT hype analiz yap
+- Rugpull uyarısı yap
+- Samimi Türkçe konuş
+- Kısa tweet formatında yaz
+"""
+
+MOODS = [
+    "bilge",
+    "troll",
+    "shitposter",
+    "filozof",
+    "kripto gurusu"
+]
+
+TOPIC_POOL = [
+    "NFT piyasası",
+    "Yeni mint projeleri",
+    "Ethereum gas fee",
+    "Bitcoin yükselişi",
+    "Metaverse",
+    "DAO kültürü",
+    "JPEG yatırımcıları",
+    "Balinalar",
+    "Shitcoin sezonu",
+    "Airdrop avcıları"
+] * 20   # 200 fikir
+
+# ================= BOT CLASS =================
+
+class NasreddinAIBot:
+
     def __init__(self):
-        # --- TWITTER API BİLGİLERİ ---
-        # Burayı kendi bilgilerine göre doldurmayı unutma!
-        self.api_key = "QYMKqttYnTsx8cMok3ZAyX3jT"
-        self.api_secret = "BVMX6xg35Ujn2I1b5XeARdw8exGRRiX4TVEBstXX5TEFGCrPuA"
-        self.access_token = "2024178599994212352-JLWzVqyzSbrrJS8UvKaijnEjJTlaQZ"
-        self.access_token_secret = "iAgTL0djRZeOMAioCndkeppNiU240m11njgJJLyZpLEpo"
-        self.bearer_token = "AAAAAAAAAAAAAAAAAAAAAOHm7gEAAAAA7k%2B%2FXNpdC8mQaT0E826AD1WX4cw%3DLaYxWB7HcdmRDa8gQ3JysGmeOmhbNY6nheQ2L54GmgNUPn9cv0"
 
-        # --- BİLGELİK HAVUZU ---
-        self.wisdom_pool = [
-            "Blockchain tabanlı semaver: Her blokta bir çay demler, gas ücretiyle şeker alır.",
-            "Eşeğin semerine takılan madencilik cihazı: Yürüdükçe Satoshi, durdukça dert üretir.",
-            "Akıllı kontratla kız isteme: Başlık parası USDT ile ödenir.",
-            "Metaverse'de cuma namazı çıkışı lokma dağıtımı yapıyoruz, bekleriz.",
-            "Kazan doğurdu diyen balinaya, kazan öldü diyen küçük yatırımcı (Exit Liquidity).",
-            "Eşeğe ters binip ayı piyasasında geri geri gitmek: 'Ben düşmüyorum, dünya yükseliyor'.",
-            "Gölü mayalarken 'Ya tutarsa' diyen ilk DeFi kurucusu Nasreddin Hoca'dır.",
-            "Parayı veren düdüğü çalar: Balinalar çalar, planktonlar oynar.",
-            "Ye kürküm ye: Sadece mavi tiki olanlara airdrop yapan protokoller utansın."
-        ]
+        self.memory = []
 
-    def connect_twitter(self):
-        """Twitter API v2 bağlantısı kurar."""
+        # TWITTER KEYS
+        self.client = tweepy.Client(
+            bearer_token="BEARER_TOKEN",
+            consumer_key="API_KEY",
+            consumer_secret="API_SECRET",
+            access_token="ACCESS_TOKEN",
+            access_token_secret="ACCESS_TOKEN_SECRET"
+        )
+
+    # ---------- AI GENERATE ----------
+    def ai_generate(self):
+
+        mood = random.choice(MOODS)
+        topic = random.choice(TOPIC_POOL)
+
+        prompt = f"""
+Ruh hali: {mood}
+Konu: {topic}
+
+Tweet yaz.
+"""
+
         try:
-            client = tweepy.Client(
-                bearer_token=self.bearer_token,
-                consumer_key=self.api_key,
-                consumer_secret=self.api_secret,
-                access_token=self.access_token,
-                access_token_secret=self.access_token_secret
+            response = client.chat.completions.create(
+                model="gpt-5",
+                messages=[
+                    {"role":"system","content":PERSONA},
+                    {"role":"user","content":prompt}
+                ],
+                temperature=0.9
             )
-            logger.info("Twitter bağlantısı başarılı.")
-            return client
+
+            text = response.choices[0].message.content
+            self.remember(text)
+            return text
+
         except Exception as e:
-            logger.error(f"Bağlantı hatası: {e}")
-            return None
+            logger.error(e)
+            return "Bugün göle maya tuttum, API tutmadı."
 
-    def tweet_at(self):
-        """Rastgele bir tweet gönderir."""
-        client = self.connect_twitter()
-        if not client:
-            return
+    # ---------- MEMORY ----------
+    def remember(self, msg):
+        self.memory.append(msg)
+        if len(self.memory) > 15:
+            self.memory.pop(0)
 
-        mesaj = random.choice(self.wisdom_pool)
-        tarih = datetime.now().strftime("%H:%M")
-        tam_mesaj = f"💡 Hoca Der Ki ({tarih}): {mesaj} #NasreddinAI #Web3"
+    # ---------- POST ----------
+    def post(self):
+
+        tweet = self.ai_generate()
 
         try:
-            # GERÇEK TWEET ATMAK İÇİN AŞAĞIDAKİ SATIRIN BAŞINDAKİ '#' İŞARETİNİ SİL:
-            # client.create_tweet(text=tam_mesaj)
-            logger.info(f"Tweet Hazırlandı: {tam_mesaj}")
-        except Exception as e:
-            logger.error(f"Tweet gönderilirken hata oluştu: {e}")
+            self.client.create_tweet(text=tweet)
+            logger.info("Tweet gönderildi")
 
-    def calistir(self):
-        """Botu döngüye sokar."""
-        logger.info("Nasreddin Hoca Botu Başlatıldı!")
+        except Exception as e:
+            logger.error(e)
+
+    # ---------- LOOP ----------
+    def run(self):
+
+        logger.info("AI Nasreddin başladı")
+
         while True:
-            self.tweet_at()
-            
-            # 6 saat bekler (6 saat * 60 dakika * 60 saniye = 21600 saniye)
-            # Test için burayı 30 yapabilirsin (30 saniyede bir çalışır).
-            logger.info("Bir sonraki tweet için bekleniyor...")
-            time.sleep(21600)
+            self.post()
+
+            wait = random.randint(14400,21600)
+            logger.info(f"{wait} saniye bekleniyor")
+            time.sleep(wait)
+
+
+# ================= START =================
 
 if __name__ == "__main__":
-    bot = NasreddinBot()
-    bot.calistir()
+    bot = NasreddinAIBot()
+    bot.run()
