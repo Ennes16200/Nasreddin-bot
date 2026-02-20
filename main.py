@@ -14,7 +14,7 @@ from openai import OpenAI
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ========= OPENAI =========
+# ========= AI Client =========
 client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ========= TWITTER =========
@@ -26,7 +26,7 @@ twitter = tweepy.Client(
     access_token_secret=os.getenv("TWITTER_ACCESS_SECRET"),
 )
 
-# ========= NFT DATA =========
+# ========= NFT COLLECTIONS =========
 COLLECTIONS = [
     "boredapeyachtclub",
     "azuki",
@@ -34,54 +34,62 @@ COLLECTIONS = [
     "pudgypenguins"
 ]
 
-def get_real_floor():
-    try:
-        slug = random.choice(COLLECTIONS)
-        url = f"https://api.opensea.io/api/v2/collections/{slug}/stats"
-        r = requests.get(url)
-        data = r.json()
-        floor = data["stats"]["floor_price"]
-        volume = data["stats"]["total_volume"]
-        return slug, floor, volume
-    except:
-        # API başarısız olursa rastgele floor ve volume
-        slug = random.choice(COLLECTIONS)
-        floor = round(random.uniform(0.3,1.7),2)
-        volume = round(random.uniform(100,10000),0)
-        return slug, floor, volume
+# ========= AGENT CLASS =========
+class NFTAgent:
+    def __init__(self, name="KriptoHoca"):
+        self.name = name
+        self.memory = []
+        self.tweet_times = []
+        self.TWEET_LIMIT_PER_HOUR = 10
 
-# ========= WHALE ANALYZER =========
-def whale_signal(volume):
-    score = 0
-    if volume > 5000:
-        score += 2
-    if random.random() > 0.7:
-        score += 1
-    signals = [
-        "balinalar sessizce topluyor",
-        "dump hazırlığı kokusu var",
-        "hacim köpürmüş gibi",
-        "likidite oyunları dönüyor"
-    ]
-    return score, random.choice(signals)
+    # --- NFT FLOOR & VOLUME ---
+    def get_nft_data(self):
+        try:
+            slug = random.choice(COLLECTIONS)
+            url = f"https://api.opensea.io/api/v2/collections/{slug}/stats"
+            r = requests.get(url)
+            data = r.json()
+            floor = data["stats"]["floor_price"]
+            volume = data["stats"]["total_volume"]
+            return slug, floor, volume
+        except:
+            slug = random.choice(COLLECTIONS)
+            floor = round(random.uniform(0.3,1.7),2)
+            volume = round(random.uniform(100,10000),0)
+            return slug, floor, volume
 
-# ========= TREND ENGINE =========
-def trend_prediction(floor, whale_score):
-    trend = floor * random.uniform(0.8,1.2) + whale_score
-    if trend > 3:
-        return "Yükseliş ihtimali güçlü"
-    elif trend > 1.5:
-        return "Dalgalı ama umut var"
-    else:
-        return "Hoca eşeğe binmez bu piyasada"
+    # --- WHALE ANALYZER ---
+    def whale_signal(self, volume):
+        score = 0
+        if volume > 5000:
+            score += 2
+        if random.random() > 0.7:
+            score += 1
+        signals = [
+            "balinalar sessizce topluyor",
+            "dump hazırlığı kokusu var",
+            "hacim köpürmüş gibi",
+            "likidite oyunları dönüyor"
+        ]
+        return score, random.choice(signals)
 
-# ========= AI TWEET =========
-def generate_tweet():
-    slug, floor, volume = get_real_floor()
-    whale_score, whale_text = whale_signal(volume)
-    trend = trend_prediction(floor, whale_score)
+    # --- TREND ENGINE ---
+    def trend_prediction(self, floor, whale_score):
+        trend = floor * random.uniform(0.8,1.2) + whale_score
+        if trend > 3:
+            return "Yükseliş ihtimali güçlü"
+        elif trend > 1.5:
+            return "Dalgalı ama umut var"
+        else:
+            return "Hoca eşeğe binmez bu piyasada"
 
-    prompt = f"""
+    # --- AI TWEET GENERATOR ---
+    def generate_tweet(self):
+        slug, floor, volume = self.get_nft_data()
+        whale_score, whale_text = self.whale_signal(volume)
+        trend = self.trend_prediction(floor, whale_score)
+
+        prompt = f"""
 Sen Nasreddin Hoca ruhuna sahip kripto filozofu AI'sın.
 NFT Koleksiyon: {slug}
 Floor: {floor}
@@ -91,66 +99,62 @@ Trend tahmini: {trend}
 Türk mizahı, zeka ve taşlama içeren tweet yaz. Max 260 karakter.
 """
 
-    response = client_ai.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role":"user","content":prompt}],
-        max_completion_tokens=120
-    )
+        self.memory.append({"role":"user","content":prompt})
 
-    return response.choices[0].message.content.strip()
+        response = client_ai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=self.memory,
+            max_completion_tokens=120
+        )
 
-# ========= TWEET GUARD =========
-tweet_times = []
-TWEET_LIMIT_PER_HOUR = 20
+        answer = response.choices[0].message.content.strip()
+        self.memory.append({"role":"assistant","content":answer})
+        return answer
 
-def can_tweet():
-    global tweet_times
-    now = datetime.now()
-    tweet_times = [t for t in tweet_times if now - t < timedelta(hours=1)]
-    if len(tweet_times) < TWEET_LIMIT_PER_HOUR:
-        tweet_times.append(now)
-        return True
-    return False
+    # --- RATE LIMIT CHECK ---
+    def can_tweet(self):
+        now = datetime.now()
+        self.tweet_times = [t for t in self.tweet_times if now - t < timedelta(hours=1)]
+        if len(self.tweet_times) < self.TWEET_LIMIT_PER_HOUR:
+            self.tweet_times.append(now)
+            return True
+        return False
 
-def send_tweet(text):
-    if can_tweet():
-        try:
-            twitter.create_tweet(text=text)
-            logger.info("Tweet sent: %s", text)
-        except Exception as e:
-            logger.error("Twitter fail: %s", e)
-    else:
-        logger.info("Rate limit reached, tweet skipped")
+    # --- SEND TWEET ---
+    def send_tweet(self, text):
+        if self.can_tweet():
+            try:
+                twitter.create_tweet(text=text)
+                logger.info("Tweet sent: %s", text)
+            except Exception as e:
+                logger.error("Twitter fail: %s", e)
+        else:
+            logger.info("Rate limit reached, tweet skipped")
 
-# ========= WATCHDOG =========
-start_time = time.time()
-RESTART_INTERVAL = 60*60*6
-MAX_MEMORY_MB = 450
-import psutil
+    # --- MEMORY & WATCHDOG ---
+    def memory_guard(self):
+        import psutil
+        mem = psutil.Process(os.getpid()).memory_info().rss / 1024 /1024
+        if mem > 450:
+            logger.warning("Memory exceeded -> Restarting")
+            os._exit(1)
 
-def memory_guard():
-    mem = psutil.Process(os.getpid()).memory_info().rss / 1024 /1024
-    if mem > MAX_MEMORY_MB:
-        logger.warning("Memory exceeded -> Restarting")
-        os._exit(1)
+    # --- MAIN LOOP ---
+    def run(self):
+        logger.info(f"{self.name} Agent STARTED")
+        while True:
+            try:
+                tweet_text = self.generate_tweet()
+                self.send_tweet(tweet_text)
+                self.memory_guard()
+                wait = random.randint(1800,7200)
+                logger.info(f"{wait} saniye bekleniyor")
+                time.sleep(wait)
+            except Exception as e:
+                logger.error("Crash caught: %s", e)
+                time.sleep(30)
 
-def restart_watchdog():
-    if time.time() - start_time > RESTART_INTERVAL:
-        logger.info("Scheduled restart")
-        os._exit(1)
-
-# ========= MAIN LOOP =========
-logger.info("NFT/AI Twitter Bot STARTED")
-
-while True:
-    try:
-        restart_watchdog()
-        memory_guard()
-        tweet_text = generate_tweet()
-        send_tweet(tweet_text)
-        wait = random.randint(1800,7200)
-        logger.info(f"{wait} saniye bekleniyor")
-        time.sleep(wait)
-    except Exception as e:
-        logger.error("Crash caught: %s", e)
-        time.sleep(30)
+# ========= RUN AGENT =========
+if __name__ == "__main__":
+    agent = NFTAgent()
+    agent.run()
