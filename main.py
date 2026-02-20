@@ -7,28 +7,29 @@ import logging
 import asyncio
 import requests
 import random
+import time
 from datetime import datetime
 
-# --- LOGGING AYARLARI (Hataları takip etmek için) ---
+# --- LOGGING AYARLARI ---
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[logging.FileHandler("hoca_bot.log"), logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
-
 class SiberDervisNasreddin:
     def __init__(self):
         self.bot_name = "Siber-Derviş Nasreddin AI"
+
+        self.version = "4.0.0-FULL-INTEGRATED"
         
         # --- TWITTER API ANAHTARLARI ---
-        # Buradaki tırnak içindeki yerleri Twitter Developer Portal'dan aldığın bilgilerle doldur.
         self.auth_keys = {
-            "api_key": "QYMKqttYnTsx8cMok3ZAyX3jT",
-            "api_secret": "BVMX6xg35Ujn2I1b5XeARdw8exGRRiX4TVEBstXX5TEFGCrPuA",
-            "access_token": "2024178599994212352-JLWzVqyzSbrrJS8UvKaijnEjJTlaQZ",
-            "access_token_secret": "iAgTL0djRZeOMAioCndkeppNiU240m11njgJJLyZpLEpo",
-            "bearer_token": "AAAAAAAAAAAAAAAAAAAAAOHm7gEAAAAA7k%2B%2FXNpdC8mQaT0E826AD1WX4cw%3DLaYxWB7HcdmRDa8gQ3JysGmeOmhbNY6nheQ2L54GmgNUPn9cv0"
+            "api_key": os.getenv("TWITTER_API_KEY", "QYMKqttYnTsx8cMok3ZAyX3jT"),
+            "api_secret": os.getenv("TWITTER_API_SECRET", "BVMX6xg35Ujn2I1b5XeARdw8exGRRiX4TVEBstXX5TEFGCrPuA"),
+            "access_token": os.getenv("TWITTER_ACCESS_TOKEN", "2024178599994212352-JLWzVqyzSbrrJS8UvKaijnEjJTlaQZ"),
+            "access_token_secret": os.getenv("TWITTER_ACCESS_TOKEN_SECRET", "iAgTL0djRZeOMAioCndkeppNiU240m11njgJJLyZpLEpo"),
+            "bearer_token": os.getenv("TWITTER_BEARER_TOKEN", "AAAAAAAAAAAAAAAAAAAAAOHm7gEAAAAA7k%2B%2FXNpdC8mQaT0E826AD1WX4cw%3DLaYxWB7HcdmRDa8gQ3JysGmeOmhbNY6nheQ2L54GmgNUPn9cv0")
         }
         
         # --- FİKİR HAVUZU ---
