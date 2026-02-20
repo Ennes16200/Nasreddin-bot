@@ -2,99 +2,89 @@
 # -*- coding: utf-8 -*-
 
 import tweepy
-import os
-import logging
-import asyncio
-import requests
-import random
 import time
+import random
+import logging
 from datetime import datetime
 
 # --- LOGGING AYARLARI ---
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.FileHandler("hoca_bot.log"), logging.StreamHandler()]
+    handlers=[
+        logging.FileHandler("hoca_bot.log", encoding='utf-8'),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
-class SiberDervisNasreddin:
-    def __init__(self):
-        self.bot_name = "Siber-Derviş Nasreddin AI"
 
-        self.version = "4.0.0-FULL-INTEGRATED"
-        
-        # --- TWITTER API ANAHTARLARI ---
-        self.auth_keys = {
-            "api_key": os.getenv("TWITTER_API_KEY", "QYMKqttYnTsx8cMok3ZAyX3jT"),
-            "api_secret": os.getenv("TWITTER_API_SECRET", "BVMX6xg35Ujn2I1b5XeARdw8exGRRiX4TVEBstXX5TEFGCrPuA"),
-            "access_token": os.getenv("TWITTER_ACCESS_TOKEN", "2024178599994212352-JLWzVqyzSbrrJS8UvKaijnEjJTlaQZ"),
-            "access_token_secret": os.getenv("TWITTER_ACCESS_TOKEN_SECRET", "iAgTL0djRZeOMAioCndkeppNiU240m11njgJJLyZpLEpo"),
-            "bearer_token": os.getenv("TWITTER_BEARER_TOKEN", "AAAAAAAAAAAAAAAAAAAAAOHm7gEAAAAA7k%2B%2FXNpdC8mQaT0E826AD1WX4cw%3DLaYxWB7HcdmRDa8gQ3JysGmeOmhbNY6nheQ2L54GmgNUPn9cv0")
-        }
-        
-        # --- FİKİR HAVUZU ---
+class NasreddinBot:
+    def __init__(self):
+        # --- TWITTER API BİLGİLERİ ---
+        # Burayı kendi bilgilerine göre doldurmayı unutma!
+        self.api_key = "QYMKqttYnTsx8cMok3ZAyX3jT"
+        self.api_secret = "BVMX6xg35Ujn2I1b5XeARdw8exGRRiX4TVEBstXX5TEFGCrPuA"
+        self.access_token = "2024178599994212352-JLWzVqyzSbrrJS8UvKaijnEjJTlaQZ"
+        self.access_token_secret = "iAgTL0djRZeOMAioCndkeppNiU240m11njgJJLyZpLEpo"
+        self.bearer_token = "AAAAAAAAAAAAAAAAAAAAAOHm7gEAAAAA7k%2B%2FXNpdC8mQaT0E826AD1WX4cw%3DLaYxWB7HcdmRDa8gQ3JysGmeOmhbNY6nheQ2L54GmgNUPn9cv0"
+
+        # --- BİLGELİK HAVUZU ---
         self.wisdom_pool = [
             "Blockchain tabanlı semaver: Her blokta bir çay demler, gas ücretiyle şeker alır.",
             "Eşeğin semerine takılan madencilik cihazı: Yürüdükçe Satoshi, durdukça dert üretir.",
             "Akıllı kontratla kız isteme: Başlık parası USDT ile ödenir.",
-            "Metaverse'de cuma namazı çıkışı lokma dağıtımı: Sadece cüzdanında 'HAYIR' token olanlara.",
-            "Kuantum tespih: Aynı anda hem çekildi hem çekilmedi, gözlemleyene kadar sevabı belli değil.",
+            "Metaverse'de cuma namazı çıkışı lokma dağıtımı yapıyoruz, bekleriz.",
             "Kazan doğurdu diyen balinaya, kazan öldü diyen küçük yatırımcı (Exit Liquidity).",
             "Eşeğe ters binip ayı piyasasında geri geri gitmek: 'Ben düşmüyorum, dünya yükseliyor'.",
-            "Gölü mayalarken 'Ya tutarsa' diyen ilk DeFi kurucusu.",
+            "Gölü mayalarken 'Ya tutarsa' diyen ilk DeFi kurucusu Nasreddin Hoca'dır.",
             "Parayı veren düdüğü çalar: Balinalar çalar, planktonlar oynar.",
-            "Ye kürküm ye: Sadece mavi tiki olanlara airdrop yapan protokoller."
+            "Ye kürküm ye: Sadece mavi tiki olanlara airdrop yapan protokoller utansın."
         ]
 
     def connect_twitter(self):
-        """Twitter'a bağlanmayı dener."""
+        """Twitter API v2 bağlantısı kurar."""
         try:
             client = tweepy.Client(
-                bearer_token=self.auth_keys["bearer_token"],
-                consumer_key=self.auth_keys["api_key"],
-                consumer_secret=self.auth_keys["api_secret"],
-                access_token=self.auth_keys["access_token"],
-                access_token_secret=self.auth_keys["access_token_secret"]
+                bearer_token=self.bearer_token,
+                consumer_key=self.api_key,
+                consumer_secret=self.api_secret,
+                access_token=self.access_token,
+                access_token_secret=self.access_token_secret
             )
-            logger.info("Twitter bağlantısı kuruldu (API anahtarları girilmemişse hata verebilir).")
+            logger.info("Twitter bağlantısı başarılı.")
             return client
         except Exception as e:
-            logger.error(f"Twitter bağlantı hatası: {e}")
+            logger.error(f"Bağlantı hatası: {e}")
             return None
 
-    def rastgele_mesaj(self):
-        """Havuzdan rastgele bir bilge söz seçer."""
+    def tweet_at(self):
+        """Rastgele bir tweet gönderir."""
+        client = self.connect_twitter()
+        if not client:
+            return
+
         mesaj = random.choice(self.wisdom_pool)
-        tarih = datetime.now().strftime("%H:%M:%S")
-        return f"💡 Hoca Der Ki ({tarih}): {mesaj} #NasreddinAI #Web3"
+        tarih = datetime.now().strftime("%H:%M")
+        tam_mesaj = f"💡 Hoca Der Ki ({tarih}): {mesaj} #NasreddinAI #Web3"
 
-    async def run_bot(self):
-        """Botun ana çalışma döngüsü."""
-        logger.info(f"{self.bot_name} aktif edildi.")
-        twitter_client = self.connect_twitter()
-        
+        try:
+            # GERÇEK TWEET ATMAK İÇİN AŞAĞIDAKİ SATIRIN BAŞINDAKİ '#' İŞARETİNİ SİL:
+            # client.create_tweet(text=tam_mesaj)
+            logger.info(f"Tweet Hazırlandı: {tam_mesaj}")
+        except Exception as e:
+            logger.error(f"Tweet gönderilirken hata oluştu: {e}")
+
+    def calistir(self):
+        """Botu döngüye sokar."""
+        logger.info("Nasreddin Hoca Botu Başlatıldı!")
         while True:
-            try:
-                icerik = self.rastgele_mesaj()
-                logger.info(f"Hazırlanan Mesaj: {icerik}")
-                
-                # Twitter'da paylaşmak için aşağıdaki satırın başındaki '#' işaretini kaldır:
-                # if twitter_client:
-                #     twitter_client.create_tweet(text=icerik)
-                #     logger.info("Tweet başarıyla gönderildi.")
-                
-                # 6 saatte bir çalışması için (Saniye cinsinden: 6 * 3600)
-                # Test etmek için burayı 10 yapabilirsin (10 saniyede bir yazar).
-                await asyncio.sleep(21600) 
-                
-            except Exception as e:
-                logger.error(f"Bir hata oluştu: {e}")
-                await asyncio.sleep(60) # Hata olursa 1 dakika bekle ve tekrar dene
+            self.tweet_at()
+            
+            # 6 saat bekler (6 saat * 60 dakika * 60 saniye = 21600 saniye)
+            # Test için burayı 30 yapabilirsin (30 saniyede bir çalışır).
+            logger.info("Bir sonraki tweet için bekleniyor...")
+            time.sleep(21600)
 
-# --- PROGRAMI BAŞLAT ---
 if __name__ == "__main__":
-    bot = SiberDervisNasreddin()
-    try:
-        asyncio.run(bot.run_bot())
-    except KeyboardInterrupt:
-        logger.info("Bot kullanıcı tarafından kapatıldı.")
+    bot = NasreddinBot()
+    bot.calistir()
