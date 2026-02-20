@@ -74,7 +74,7 @@ def generate_tweet():
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": f"{topic} hakkında tweet üret"}
             ],
-            max_tokens=80
+            max_completion_tokens=80
         )
 
         tweet = response.choices[0].message.content.strip()
