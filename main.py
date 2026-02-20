@@ -101,7 +101,7 @@ Türk mizahı, zeka ve taşlama içeren tweet yaz. Max 260 karakter.
 
 # ========= TWEET GUARD =========
 tweet_times = []
-TWEET_LIMIT_PER_HOUR = 10
+TWEET_LIMIT_PER_HOUR = 20
 
 def can_tweet():
     global tweet_times
