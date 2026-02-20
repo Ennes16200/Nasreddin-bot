@@ -1,251 +1,205 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
 import os
 import time
+import json
 import random
 import logging
-import base64
+import psutil
 import requests
-
-import tweepy
+from datetime import datetime, timedelta
 from openai import OpenAI
+import tweepy
 
+# =========================
+# CONFIG
+# =========================
 
-# ================= LOG =================
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+TW_API_KEY = os.getenv("TW_API_KEY")
+TW_API_SECRET = os.getenv("TW_API_SECRET")
+TW_ACCESS_TOKEN = os.getenv("TW_ACCESS_TOKEN")
+TW_ACCESS_SECRET = os.getenv("TW_ACCESS_SECRET")
+
+RESTART_INTERVAL = 60 * 60 * 6
+MAX_MEMORY_MB = 450
+TWEET_LIMIT_PER_HOUR = 10
+PERSONA_FILE = "persona.json"
+
+LOOP_MIN = 1800
+LOOP_MAX = 7200
+
+# =========================
+# LOGGING
+# =========================
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
+    format="%(asctime)s - %(levelname)s - %(message)s"
 )
-log = logging.getLogger()
 
+# =========================
+# OPENAI
+# =========================
 
-# ================= BOT =================
-class HocaUltra:
+client_ai = OpenAI(api_key=OPENAI_API_KEY)
 
-    def __init__(self):
+# =========================
+# TWITTER
+# =========================
 
-        # --- KEYS ---
-        self.api_key=os.getenv("TW_API_KEY")
-        self.api_secret=os.getenv("TW_API_SECRET")
-        self.access=os.getenv("TW_ACCESS_TOKEN")
-        self.access_secret=os.getenv("TW_ACCESS_SECRET")
-        self.bearer=os.getenv("TW_BEARER")
+client_twitter = tweepy.Client(
+    consumer_key=TW_API_KEY,
+    consumer_secret=TW_API_SECRET,
+    access_token=TW_ACCESS_TOKEN,
+    access_token_secret=TW_ACCESS_SECRET
+)
 
-        self.ai=OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# =========================
+# MEMORY GUARD
+# =========================
 
-        self.last_mentions=None
+def memory_guard():
+    mem = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+    if mem > MAX_MEMORY_MB:
+        logging.warning("Memory exceeded -> Restarting")
+        os._exit(1)
 
-        # --- Persona ---
-        self.moods={
-            "bilge":1,
-            "troll":1,
-            "absurt":1,
-            "kriptofilozof":1,
-            "nftseyyah":1
-        }
+# =========================
+# WATCHDOG
+# =========================
 
-        self.nft_list=[
-            "Azuki","Doodles","Pudgy Penguins",
-            "CoolCats","BoredApes"
-        ]
+start_time = time.time()
 
-        self.influencers=[
-            "cz_binance",
-            "VitalikButerin",
-            "garyvee"
-        ]
+def restart_watchdog():
+    if time.time() - start_time > RESTART_INTERVAL:
+        logging.info("Scheduled restart")
+        os._exit(1)
 
-    # ================= TWITTER CLIENT =================
-    def client(self):
-        return tweepy.Client(
-            bearer_token=self.bearer,
-            consumer_key=self.api_key,
-            consumer_secret=self.api_secret,
-            access_token=self.access,
-            access_token_secret=self.access_secret
-        )
+# =========================
+# RATE LIMIT
+# =========================
 
-    def media_api(self):
-        auth=tweepy.OAuth1UserHandler(
-            self.api_key,
-            self.api_secret,
-            self.access,
-            self.access_secret
-        )
-        return tweepy.API(auth)
+tweet_times = []
 
-    # ================= MARKET =================
-    def btc(self):
-        try:
-            r=requests.get(
-                "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
-            ).json()
-            return r["bitcoin"]["usd"]
-        except:
-            return "?"
+def can_tweet():
+    global tweet_times
+    now = datetime.now()
+    tweet_times = [t for t in tweet_times if now - t < timedelta(hours=1)]
+    if len(tweet_times) < TWEET_LIMIT_PER_HOUR:
+        tweet_times.append(now)
+        return True
+    return False
 
-    def market(self):
-        gold=random.randint(1800,2600)
-        bist=random.randint(7000,12000)
-        return f"BTC:{self.btc()}$ ALTIN:{gold}$ BIST:{bist}"
+# =========================
+# PERSONA MEMORY
+# =========================
 
-    # ================= AI =================
-    def mood_pick(self):
-        pool=[]
-        for m,w in self.moods.items():
-            pool += [m]*w
-        return random.choice(pool)
+def load_persona():
+    if os.path.exists(PERSONA_FILE):
+        with open(PERSONA_FILE,"r") as f:
+            return json.load(f)
+    return {"history":[]}
 
-    def evolve(self,m):
-        self.moods[m]+=1
+def save_persona(p):
+    with open(PERSONA_FILE,"w") as f:
+        json.dump(p,f)
 
-    def ai_tweet(self,mood,market,nft):
-        prompt=f"""
-Modern Nasreddin Hoca'sın.
-Türk mizahı yap.
-Kripto, NFT, borsa biliyorsun.
+persona = load_persona()
 
-Mood:{mood}
-Market:{market}
-NFT:{nft}
+# =========================
+# DATA SOURCES
+# =========================
 
-Tweet yaz 280 karakter
+def get_gold_price():
+    try:
+        r = requests.get("https://api.metals.live/v1/spot/gold")
+        return float(r.json()[0]["price"])
+    except:
+        return None
+
+def get_nft_floor():
+    # Buraya OpenSea API ekleyebiliriz
+    return round(random.uniform(0.3, 1.7),2)
+
+# =========================
+# AI ENGINE
+# =========================
+
+def generate_tweet(gold, nft):
+
+    system_prompt = """
+Sen Nasreddin Hoca tarzında konuşan,
+NFT bilen,
+Kripto kültürüne hakim,
+Türk mizahı yapan,
+Altın ve BIST yorumlayan
+bilge bir trader karakterisin.
 """
-        try:
-            r=self.ai.responses.create(
-                model="gpt-5-mini",
-                input=prompt,
-                max_output_tokens=120
-            )
-            return r.output_text
-        except:
-            return "Eşeğe sordum piyasayı, long dedi 🫏"
 
-    def ai_reply(self,text):
-        prompt=f"""
-Nasreddin Hoca karakterinde eğlenceli cevap yaz:
-
-{text}
+    user_prompt = f"""
+Altın fiyatı: {gold}
+NFT floor: {nft}
+Buna göre 280 karakterlik eğlenceli tweet yaz.
 """
-        try:
-            r=self.ai.responses.create(
-                model="gpt-5-mini",
-                input=prompt,
-                max_output_tokens=80
-            )
-            return r.output_text
-        except:
-            return "Hoca düşündü ama cevap vermedi 🙂"
 
-    # ================= IMAGE =================
-    def image(self,prompt):
-        try:
-            img=self.ai.images.generate(
-                model="gpt-image-1",
-                prompt=prompt,
-                size="1024x1024"
-            )
-            b=base64.b64decode(img.data[0].b64_json)
-            with open("img.png","wb") as f:
-                f.write(b)
-            return "img.png"
-        except:
-            return None
+    response = client_ai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role":"system","content":system_prompt},
+            {"role":"user","content":user_prompt}
+        ],
+        max_completion_tokens=300
+    )
 
-    # ================= POST =================
-    def tweet(self,text):
-        self.client().create_tweet(text=text)
+    return response.choices[0].message.content.strip()
 
-    def tweet_img(self,text,img):
-        m=self.media_api().media_upload(img)
-        self.client().create_tweet(
-            text=text,
-            media_ids=[m.media_id]
-        )
+# =========================
+# TWEET
+# =========================
 
-    # ================= VIRAL =================
-    def hashtags(self):
-        tags=[
-            "#Bitcoin","#NFT","#Web3",
-            "#Kripto","#Borsa","#Altcoin"
-        ]
-        return " ".join(random.sample(tags,2))
+def send_tweet(text):
+    if not can_tweet():
+        logging.info("Rate limit reached")
+        return
 
-    # ================= MENTIONS =================
-    def reply_mentions(self):
-        try:
-            c=self.client()
-            mentions=c.get_users_mentions(id=c.get_me().data.id)
+    try:
+        client_twitter.create_tweet(text=text)
+        logging.info("Tweet sent")
+    except Exception as e:
+        logging.error(f"Twitter error: {e}")
 
-            if mentions.data:
-                for m in mentions.data:
-                    if self.last_mentions==m.id:
-                        return
-                    r=self.ai_reply(m.text)
-                    c.create_tweet(
-                        text=r,
-                        in_reply_to_tweet_id=m.id
-                    )
-                    self.last_mentions=m.id
-        except:
-            pass
+# =========================
+# MAIN LOOP
+# =========================
 
-    # ================= INFLUENCER WATCH =================
-    def watch(self):
-        try:
-            c=self.client()
-            for name in self.influencers:
-                u=c.get_user(username=name)
-                tweets=c.get_users_tweets(id=u.data.id,max_results=5)
-                if tweets.data:
-                    if random.random()>0.7:
-                        t=random.choice(tweets.data)
-                        self.tweet(
-                            f"@{name} bunu dedi ki:\n{t.text[:150]}"
-                        )
-        except:
-            pass
+logging.info("BOT STARTED")
 
-    # ================= LOOP =================
-    def run(self):
+while True:
+    try:
+        restart_watchdog()
+        memory_guard()
 
-        log.info("ULTRA BOT START")
+        gold = get_gold_price()
+        nft = get_nft_floor()
 
-        while True:
-            try:
+        if gold is None:
+            gold = "veri yok"
 
-                self.reply_mentions()
-                self.watch()
+        tweet_text = generate_tweet(gold, nft)
 
-                mood=self.mood_pick()
-                nft=random.choice(self.nft_list)
-                market=self.market()
+        send_tweet(tweet_text)
 
-                txt=self.ai_tweet(mood,market,nft)
-                final=f"{txt}\n\n📊 {market}\n🎨 {nft}\n{self.hashtags()}"
+        persona["history"].append(tweet_text)
+        persona["history"] = persona["history"][-20:]
+        save_persona(persona)
 
-                if random.random()>0.5:
-                    img=self.image(
-                        f"Nasreddin hoca nft crypto art {mood}"
-                    )
-                    if img:
-                        self.tweet_img(final,img)
-                    else:
-                        self.tweet(final)
-                else:
-                    self.tweet(final)
+        wait_time = random.randint(LOOP_MIN, LOOP_MAX)
+        logging.info(f"Sleeping {wait_time} seconds")
 
-                self.evolve(mood)
+        time.sleep(wait_time)
 
-                wait=random.randint(1800,7200)
-                log.info(f"{wait}s sleep")
-                time.sleep(wait)
-
-            except Exception as e:
-                log.error(e)
-                time.sleep(120)
-
-
-# ================= START =================
-if __name__=="__main__":
-    HocaUltra().run()
+    except Exception as e:
+        logging.error(f"Crash caught: {e}")
+        time.sleep(30)
