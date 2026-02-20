@@ -14,17 +14,20 @@ from openai import OpenAI
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ========= API İSTEMCİLERİ =========
-# Not: Bu değerleri ortam değişkeni (env) olarak tanımlamanız önerilir.
-client_ai = OpenAI(api_key="OPENAI_API_KEY_BURAYA")
+# ========= API İSTEMCİLERİ (GİZLİ FORMAT) =========
+# Ortam değişkenlerinden (Environment Variables) verileri çekiyoruz
+client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 twitter = tweepy.Client(
-    bearer_token="BEARER_TOKEN_BURAYA",
-    consumer_key="API_KEY_BURAYA",
-    consumer_secret="API_SECRET_BURAYA",
-    access_token="ACCESS_TOKEN_BURAYA",
-    access_token_secret="ACCESS_SECRET_BURAYA",
+    bearer_token=os.getenv("TWITTER_BEARER"),
+    consumer_key=os.getenv("TWITTER_API_KEY"),
+    consumer_secret=os.getenv("TWITTER_API_SECRET"),
+    access_token=os.getenv("TWITTER_ACCESS_TOKEN"),
+    access_token_secret=os.getenv("TWITTER_ACCESS_SECRET"),
 )
+
+# Telegram kullanacaksanız:
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 # ========= KRIPTO HOCA AGENT =========
 class KriptoHocaAgent:
@@ -32,6 +35,10 @@ class KriptoHocaAgent:
         self.name = name
         self.tweet_times = []
         self.TWEET_LIMIT_PER_HOUR = 5
+        
+        # API Anahtarlarının yüklendiğini kontrol et
+        if not os.getenv("OPENAI_API_KEY"):
+            logger.error("DİKKAT: OPENAI_API_KEY bulunamadı! Lütfen environment variables ayarlarını kontrol edin.")
 
     def check_security(self, chain_id, contract_address):
         """GoPlus Security API kullanarak kontratı tarar."""
@@ -41,8 +48,8 @@ class KriptoHocaAgent:
         try:
             url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={contract_address}"
             res = requests.get(url, timeout=10).json()
-            if res.get("code") == 1:
-                data = res["result"][contract_address.lower()]
+            if res.get("code") == 1 and res.get("result"):
+                data = res["result"].get(contract_address.lower(), {})
                 
                 risks = []
                 if data.get("is_honeypot") == "1": risks.append("BAL KÜPÜ (Honeypot) TUZAĞI!")
@@ -64,8 +71,8 @@ class KriptoHocaAgent:
             btc_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()
             gold_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT").json()
             
-            btc = btc_res.get('price', '0')
-            gold = gold_res.get('price', '0')
+            btc = btc_res.get('price', '0') if isinstance(btc_res, dict) else btc_res[0]['price']
+            gold = gold_res.get('price', '0') if isinstance(gold_res, dict) else gold_res[0]['price']
 
             # 2. Trend Projeler (CoinGecko)
             t_res = requests.get("https://api.coingecko.com/api/v3/search/trending").json()
@@ -74,10 +81,8 @@ class KriptoHocaAgent:
                 
             top_coin = t_res['coins'][0]['item']
             coin_name = top_coin['name']
-            # Trend coinlerin kontrat adresini almaya çalışalım (varsa)
             contract_addr = top_coin.get('native_slug', 'N/A') 
             
-            # Güvenlik kontrolü (Örnek olarak Ethereum/1 ağında tarıyoruz)
             security_report = self.check_security("1", contract_addr)
 
             # 3. Korku Endeksi
