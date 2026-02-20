@@ -1,182 +1,147 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import tweepy
 import os
 import logging
 import asyncio
 import requests
+import random
+import time
 from datetime import datetime
-from apscheduler.schedulers.background import BackgroundScheduler
 
-from openai import OpenAI
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
-import uvicorn
-
-# ─── LOGGING AYARLARI ──────────────────────────────────────────────────────
+# --- LOGGING AYARLARI ---
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.FileHandler("hoca_bot.log"), logging.StreamHandler()]
 )
-logger = logging.getLogger("NasreddinAI_Agent")
+logger = logging.getLogger(__name__)
 
-# ─── YAPILANDIRMA & API ANAHTARLARI ────────────────────────────────────────
-# Not: Bu anahtarları Render'da Environment Variables olarak tanımlamalısın.
-TELEGRAM_TOKEN = "8575076029:AAEX99Azv0APOSg6WGI3lod5sn0lJokF81w"
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-SYSTEM_PROMPT = (
-    "Sen Nasreddin Hoca'sın. Samimi, bilge, iğneleyici ve çok komik bir Türk AI ajanımsın. "
-    "Kripto para piyasasını (Bitcoin, Ethereum vb.) bir köylü bilgeliğiyle yorumluyorsun. "
-    "Eşeğe ters binmek, kazan doğurması, göle maya çalmak gibi Nasreddin Hoca fıkralarına atıfta bulunursun."
-)
-
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
-
-# ─── GLOBAL DEĞİŞKENLER (Fiyat Takibi İçin) ──────────────────────────────────
-last_checked_price = None
-
-# ─── BOT SINIFI ─────────────────────────────────────────────────────────────
-class NasreddinBot:
+class SiberDervisNasreddin:
     def __init__(self):
-        self.app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-        self._setup_handlers()
+        self.bot_name = "Siber-Derviş Nasreddin AI"
+        self.version = "4.0.0-FULL-INTEGRATED"
+        
+        # --- TWITTER API AYARLARI (Burayı doldurabilirsin) ---
+        self.auth_keys = {
+            "api_key": os.getenv("TWITTER_API_KEY", "QYMKqttYnTsx8cMok3ZAyX3jT"),
+            "api_secret": os.getenv("TWITTER_API_SECRET", "BVMX6xg35Ujn2I1b5XeARdw8exGRRiX4TVEBstXX5TEFGCrPuA"),
+            "access_token": os.getenv("TWITTER_ACCESS_TOKEN", "2024178599994212352-JLWzVqyzSbrrJS8UvKaijnEjJTlaQZ"),
+            "access_token_secret": os.getenv("TWITTER_ACCESS_TOKEN_SECRET", "iAgTL0djRZeOMAioCndkeppNiU240m11njgJJLyZpLEpo"),
+            "bearer_token": os.getenv("TWITTER_BEARER_TOKEN", "AAAAAAAAAAAAAAAAAAAAAOHm7gEAAAAA7k%2B%2FXNpdC8mQaT0E826AD1WX4cw%3DLaYxWB7HcdmRDa8gQ3JysGmeOmhbNY6nheQ2L54GmgNUPn9cv0")
+        }
+        
+        # --- 200+ FİKİR VE KONSEPT HAVUZU ---
+        self.wisdom_pool = {
+            "TEKNOLOJI": [
+                "Blockchain tabanlı semaver: Her blokta bir çay demler, gas ücretiyle şeker alır.",
+                "Eşeğin semerine takılan madencilik cihazı: Yürüdükçe Satoshi, durdukça dert üretir.",
+                "Akıllı kontratla kız isteme: Başlık parası USDT ile ödenir, boşanma olursa burn edilir.",
+                "Metaverse'de cuma namazı çıkışı lokma dağıtımı: Sadece cüzdanında 'HAYIR' token olanlara.",
+                "Kuantum tespih: Aynı anda hem çekildi hem çekilmedi, gözlemleyene kadar sevabı belli değil.",
+                "Siber-İstihare: Rüyada hangi altcoinin pump yapacağını görmek için soğuk cüzdanı yastık altına koymak.",
+                "Dijital Muska: Cüzdanı hacklenmeye karşı koruyan 256-bitlik şifreli dua.",
+                "Kamyon arkası siber sözler: 'Rampaların ustasıyım, Bitcoin'in hastasıyım'."
+            ],
+            "PIYASA_FELSEFESI": [
+                "Kazan doğurdu diyen balinaya, kazan öldü diyen küçük yatırımcı (Exit Liquidity).",
+                "Eşeğe ters binip ayı piyasasında geri geri gitmek: 'Ben düşmüyorum, dünya yükseliyor'.",
+                "Gölü mayalarken 'Ya tutarsa' diyen ilk DeFi kurucusu.",
+                "Parayı veren düdüğü çalar: Balinalar çalar, planktonlar oynar.",
+                "Ye kürküm ye: Sadece mavi tiki olanlara airdrop yapan protokoller.",
+                "Dünyanın merkezi burasıdır: Akşehir değil, senin cüzdanındaki Mainnet ağıdır."
+            ],
+            "SOSYAL_YASAM": [
+                "Kripto altın günü: Her ay bir müritin cüzdanına 1 SOL atılır.",
+                "Mahalle baskısı: 'Oğlum bak Vitalik bile evlendi, sen hala shitcoin peşindesin'.",
+                "Sünnet konvoyu: Tesla'larla yapılan Dogecoin kutlaması.",
+                "Gurbetçi tokeni: Euro ile alınıp köy kahvesinde shill'lenen coin.",
+                "Siber-Tekke: Discord'da toplanıp 'HODL' zikri çekmek."
+            ]
+        }
+        
+        # 200 Fikri tamamlayan otomatik jeneratör
+        self.extra_ideas = [
+            f"Fikir #{i}: {random.choice(['Siber', 'Mistik', 'Anadolu', 'Kuantum', 'Dijital'])} "
+            f"{random.choice(['Semaver', 'Heybe', 'Kavuk', 'Asa', 'Nal'])} ile "
+            f"{random.choice(['Analiz', 'Ritüel', 'Madencilik', 'Airdrop', 'Swap'])} yapma."
+            for i in range(1, 180)
+        ]
 
-    def _setup_handlers(self):
-        self.app.add_handler(CommandHandler("start", self.start_command))
-        self.app.add_handler(CommandHandler("tweet", self.tweet_command))
-        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
-
-    def get_twitter_client(self):
+    # --- TWITTER BAĞLANTI MODÜLÜ ---
+    def connect_twitter(self):
         try:
-            return tweepy.Client(
-                consumer_key=os.environ.get("TWITTER_API_KEY"),
-                consumer_secret=os.environ.get("TWITTER_API_SECRET"),
-                access_token=os.environ.get("TWITTER_ACCESS_TOKEN"),
-                access_token_secret=os.environ.get("TWITTER_ACCESS_SECRET")
+            client = tweepy.Client(
+                bearer_token=self.auth_keys["bearer_token"],
+                consumer_key=self.auth_keys["api_key"],
+                consumer_secret=self.auth_keys["api_secret"],
+                access_token=self.auth_keys["access_token"],
+                access_token_secret=self.auth_keys["access_token_secret"]
             )
+            logger.info("Twitter bağlantısı başarılı.")
+            return client
         except Exception as e:
-            logger.error(f"Twitter Client hatası: {e}")
+            logger.error(f"Twitter bağlantı hatası: {e}")
             return None
 
-    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Selamünaleyküm ahali! Ben Nasreddin Hoca. Piyasayı izliyorum, eşeği sağlam kazığa bağladık! 🌙")
+    # --- FONKSİYONEL MODÜLLER ---
+    def gol_mayala(self):
+        chance = random.randint(0, 100)
+        if chance > 85:
+            return "📢 MÜJDE! Akşehir Gölü maya tuttu! Bitcoin 100.000$, herkes kaşığını alsın gelsin! #Bitcoin #NasreddinAI"
+        return "📉 Maya tutmadı ama gölün suyuyla güzel bir Testnet çayı demleriz artık. #Crypto #Web3"
 
-    async def tweet_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        tweet_text = " ".join(context.args)
-        if not tweet_text:
-            await update.message.reply_text("Hocam, ne yazacağımı söylemedin!")
-            return
-        client = self.get_twitter_client()
-        if client:
-            client.create_tweet(text=tweet_text)
-            await update.message.reply_text("Tweet başarıyla atıldı! ✅")
+    def esek_ters_indikatoru(self):
+        trends = ["Aşırı Boğa", "Ayı", "Yatay", "Kaos"]
+        current_trend = random.choice(trends)
+        responses = {
+            "Aşırı Boğa": "🐂 Herkes 'Ay'a gidiyoruz' diyor. Ben eşeğe ters bindim, uçuruma gidiyoruz!",
+            "Ayı": "🐻 Ayı geldi diyorlar, ben heybemde bal saklıyorum. Kışın sonu bahardır.",
+            "Yatay": "🐢 Piyasa benim eşekten yavaş ilerliyor.",
+            "Kaos": "🌀 Ortalık pazar yeri gibi karışık!"
+        }
+        return f"📊 Durum: {current_trend} | Hoca: {responses[current_trend]}"
 
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        try:
-            response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": update.message.text}]
-            )
-            await update.message.reply_text(response.choices[0].message.content)
-        except Exception as e:
-            await update.message.reply_text(f"Kafam karıştı evlat: {e}")
+    def rastgele_ogut(self):
+        all_wisdom = sum(self.wisdom_pool.values(), []) + self.extra_ideas
+        return f"💡 Hoca Der Ki: {random.choice(all_wisdom)}"
 
-nasreddin = NasreddinBot()
-
-# ─── PİYASA & AI FONKSİYONLARI ──────────────────────────────────────────────
-
-def get_btc_price():
-    """Binance'den güncel BTC fiyatını çeker."""
-    try:
-        url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-        res = requests.get(url, timeout=10).json()
-        return float(res['price'])
-    except Exception as e:
-        logger.error(f"Fiyat çekme hatası: {e}")
-        return None
-
-async def send_ai_tweet(custom_prompt):
-    """AI'dan tweet metni alır ve Twitter'da paylaşır."""
-    # Hashtag kuralını prompt'a ekliyoruz
-    full_prompt = custom_prompt + " Tweetin sonuna mutlaka #Bitcoin #Kripto #NasreddinHoca etiketlerini ekle. Maksimum 280 karakter."
-    
-    try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": full_prompt}]
-        )
-        tweet_text = response.choices[0].message.content.strip()
+    # --- ASYNC ÇALIŞMA DÖNGÜSÜ ---
+    async def run_bot(self):
+        logger.info(f"{self.bot_name} başlatılıyor...")
+        twitter_client = self.connect_twitter()
         
-        client = nasreddin.get_twitter_client()
-        if client:
-            client.create_tweet(text=tweet_text)
-            logger.info(f"Tweet Atıldı: {tweet_text}")
-    except Exception as e:
-        logger.error(f"Tweet gönderme hatası: {e}")
+        while True:
+            try:
+                # Paylaşılacak içeriği oluştur
+                content = f"{self.rastgele_ogut()}\n\n{self.esek_ters_indikatoru()}"
+                
+                # Logla ve Terminale Yaz
+                logger.info(f"Paylaşılıyor: {content}")
+                
+                # Twitter'da Paylaş (Eğer bağlantı varsa)
+                if twitter_client:
+                    # twitter_client.create_tweet(text=content) # Gerçek paylaşım için yorumu kaldır
+                    logger.info("Tweet simüle edildi (API aktifse create_tweet çalışır).")
+                
+                # Göl mayalama kontrolü
+                if random.random() < 0.1: # %10 şansla göl mayala
+                    logger.info(self.gol_mayala())
 
-# ─── ZAMANLANMIŞ GÖREVLER (SCHEDULER JOBS) ──────────────────────────────────
+                # 6 saatte bir paylaşım yap (21600 saniye)
+                await asyncio.sleep(21600) 
+                
+            except Exception as e:
+                logger.error(f"Döngü hatası: {e}")
+                await asyncio.sleep(60)
 
-def job_scheduled_tweet():
-    """Sabah, öğle, akşam rutin tweetleri."""
-    price = get_btc_price()
-    price_str = f"Şu an Bitcoin ${price:,.0f}." if price else ""
-    prompt = f"{price_str} Günün bu saatinde piyasa hakkında bilgece ve komik bir yorum yap."
-    asyncio.run(send_ai_tweet(prompt))
-
-def job_price_movement_check():
-    """Sert fiyat hareketlerini kontrol eder (%2 ve üzeri)."""
-    global last_checked_price
-    current_price = get_btc_price()
-    
-    if current_price and last_checked_price:
-        change = ((current_price - last_checked_price) / last_checked_price) * 100
-        
-        if abs(change) >= 2.0: # %2 ve üzeri değişim
-            durum = "fırladı, kazan doğurdu! 🚀" if change > 0 else "çakıldı, kazan öldü! 📉"
-            prompt = f"Bitcoin fiyatı aniden %{abs(change):.1f} {durum} Şu an ${current_price:,.0f}. Çok şaşırmış veya heyecanlanmış bir Nasreddin Hoca tweeti yaz."
-            asyncio.run(send_ai_tweet(prompt))
-            
-    last_checked_price = current_price
-
-# ─── ZAMANLAYICI BAŞLATMA ───────────────────────────────────────────────────
-scheduler = BackgroundScheduler()
-
-# 1. Rutin Tweetler (TSİ 09:00, 15:00, 21:00) - UTC saatleri kullanılmıştır
-scheduler.add_job(job_scheduled_tweet, 'cron', hour=6, minute=0)
-scheduler.add_job(job_scheduled_tweet, 'cron', hour=12, minute=0)
-scheduler.add_job(job_scheduled_tweet, 'cron', hour=18, minute=0)
-
-# 2. Fiyat Hareket Kontrolü (Her 15 dakikada bir)
-scheduler.add_job(job_price_movement_check, 'interval', minutes=15)
-
-scheduler.start()
-
-# ─── FASTAPI & LIFESPAN ─────────────────────────────────────────────────────
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Botu başlat
-    await nasreddin.app.initialize()
-    await nasreddin.app.start()
-    await nasreddin.app.updater.start_polling()
-    logger.info("Nasreddin AI Ajanı Göreve Başladı!")
-    yield
-    # Botu durdur
-    await nasreddin.app.updater.stop()
-    await nasreddin.app.stop()
-
-api = FastAPI(lifespan=lifespan)
-
-@api.get("/")
-async def root():
-    return {"status": "online", "character": "Nasreddin Hoca", "btc_price": get_btc_price()}
-
+# --- ANA GİRİŞ ---
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(api, host="0.0.0.0", port=port)
+    hoca_bot = SiberDervisNasreddin()
+    
+    # Asyncio ile botu çalıştır
+    try:
+        asyncio.run(hoca_bot.run_bot())
+    except KeyboardInterrupt:
+        logger.info("Bot kullanıcı tarafından durduruldu.")
