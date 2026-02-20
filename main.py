@@ -13,7 +13,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # ========= API İSTEMCİLERİ =========
-# Ortam değişkenlerinden API anahtarlarını alıyoruz
 client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 twitter = tweepy.Client(
@@ -53,57 +52,28 @@ class KriptoHocaAgent:
         return "İnceleme yapılamadı."
 
     def get_market_wisdom(self):
-        """Piyasa verilerini toplar (Hata korumalı ve yedekli)."""
+        """Piyasa verilerini toplar."""
         try:
-            # 1. Fiyat Verisi (Binance + CoinGecko yedeği)
-            btc_price = "0"
-            try:
-                btc_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10).json()
-                btc_price = btc_res.get('price', "0")
-            except:
-                btc_res = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", timeout=10).json()
-                btc_price = btc_res.get('bitcoin', {}).get('usd', "0")
+            # 1. Fiyat Verisi
+            btc_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10).json()
+            btc_price = btc_res.get('price', "0")
 
-            # 2. Trend Verisi
-            trend_name = "Piyasa durgun"
-            security_info = "İnceleme yapılamadı"
-            try:
-                t_res = requests.get("https://api.coingecko.com/api/v3/search/trending", timeout=10).json()
-                if 'coins' in t_res and len(t_res['coins']) > 0:
-                    top_coin = t_res['coins'][0]['item']
-                    trend_name = top_coin.get('name', "Bilinmeyen Coin")
-                    security_info = self.check_security("1", top_coin.get('native_slug', 'N/A'))
-            except:
-                pass
+            # 2. Korku Endeksi
+            fng_res = requests.get("https://api.alternative.me/fng/", timeout=10).json()
+            fng = fng_res.get('data', [{}])[0].get('value', "50")
 
-            # 3. Korku Endeksi
-            fng = "50"
-            try:
-                fng_res = requests.get("https://api.alternative.me/fng/", timeout=10).json()
-                fng = fng_res.get('data', [{}])[0].get('value', "50")
-            except:
-                pass
-
-            return {
-                "btc": round(float(btc_price), 2),
-                "trend": trend_name,
-                "security": security_info,
-                "fng": fng
-            }
+            return {"btc": round(float(btc_price), 2), "fng": fng}
         except Exception as e:
             logger.error(f"Veri toplama hatası: {e}")
-            return None
+            return {"btc": "Bilinmiyor", "fng": "50"}
 
-    def generate_wisdom_tweet(self):
-        """Genel piyasa tweeti üretir."""
+    def generate_manual_wisdom(self, haber, balina):
+        """Senin verdiğin manuel verileri Hoca diliyle yorumlar."""
         w = self.get_market_wisdom()
-        if not w: return None
-        
-        # Prompt güncellendi: İsim etiketi yasaklandı ve yaratıcılık eklendi.
-        prompt = (f"BTC: {w['btc']}$, Trend: {w['trend']}, Güvenlik: {w['security']}, Korku: {w['fng']}/100. "
-                  f"Nasreddin Hoca olarak iğneleyici, fıkra temalı bir Türkçe tweet yaz. "
-                  f"ÖNEMLİ: Cevaba asla 'Nasreddin Hoca:' veya 'Hoca:' gibi isim etiketleri ekleme, doğrudan cümleye baş. "
-                  f"Sürekli aynı hitapları kullanma, yaratıcı ol. (Max 240 karakter).")
+        prompt = (f"Piyasa Durumu -> BTC: {w['btc']}$, Korku Endeksi: {w['fng']}/100. "
+                  f"GÜNCEL HABER: {haber}. BALİNA HAREKETİ: {balina}. "
+                  f"Nasreddin Hoca olarak bu durumu iğneleyici, fıkra temalı bir Türkçe tweet yaz. "
+                  f"Asla 'Hoca:' gibi isim etiketleri kullanma. Doğrudan cümleye baş. (Max 240 karakter).")
         
         try:
             response = client_ai.chat.completions.create(
@@ -111,57 +81,54 @@ class KriptoHocaAgent:
                 messages=[{"role": "system", "content": "Sen bilge ve iğneleyici Nasreddin Hoca'sın."}, {"role": "user", "content": prompt}]
             )
             return response.choices[0].message.content.strip()
-        except: return None
-
-    def generate_reply(self, user_tweet):
-        """Mention (etiketleme) yanıtı üretir."""
-        # Prompt güncellendi: İsim etiketi yasaklandı ve doğrudan konuşma istendi.
-        prompt = (f"Kullanıcı sana şunu dedi: '{user_tweet}'. Nasreddin Hoca olarak bilgece, fıkra elementli ve kripto jargonlu komik bir cevap ver. "
-                  f"ÖNEMLİ: Cevabın başına asla 'Nasreddin Hoca:' veya isim yazma, doğrudan konuşmaya baş. "
-                  f"Sürekli 'Evladım' deme, farklı ve bilgece hitaplar kullan. (Max 200 karakter).")
-        
-        try:
-            response = client_ai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "system", "content": "Sen Nasreddin Hoca'sın."}, {"role": "user", "content": prompt}]
-            )
-            return response.choices[0].message.content.strip()
-        except: return None
+        except Exception as e:
+            logger.error(f"AI Yanıt Hatası: {e}")
+            return None
 
     def check_mentions(self):
-        """Gelen mention'ları kontrol eder ve yanıtlar."""
+        """Gelen mention'ları kontrol eder."""
         if not self.me: return
         try:
             mentions = twitter.get_users_mentions(id=self.me.id, since_id=self.last_mention_id)
-            if not mentions.data: return
+            if not mentions or not mentions.data: return
             for tweet in mentions.data:
                 self.last_mention_id = tweet.id
-                reply = self.generate_reply(tweet.text)
-                if reply:
-                    twitter.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
-                    logger.info(f"Yanıtlandı: {tweet.text} -> {reply}")
-                time.sleep(5) # Twitter spam filtresine takılmamak için kısa bekleme
+                # Mention yanıtı üretme
+                prompt = f"Kullanıcı: '{tweet.text}'. Nasreddin Hoca olarak kısa, komik ve bilgece bir cevap ver."
+                response = client_ai.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "system", "content": "Sen Nasreddin Hoca'sın."}, {"role": "user", "content": prompt}]
+                )
+                reply = response.choices[0].message.content.strip()
+                twitter.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
+                logger.info(f"Yanıtlandı: {reply}")
         except Exception as e:
             logger.error(f"Mention hatası: {e}")
 
-    def run(self):
-        """Botun ana döngüsü."""
-        logger.info("=== Hoca Piyasaya İndi! ===")
-        last_wisdom_time = 0
+    def run_manual_mode(self):
+        """Botu senin kontrolünde çalıştırır."""
+        logger.info("=== Hoca Manuel Kürsüde! ===")
         while True:
+            print("\n--- Yeni Tweet Hazırlığı ---")
+            haber = input("Haber (Boş bırakmak için Enter): ")
+            balina = input("Balina Hareketi (Boş bırakmak için Enter): ")
+            
+            tweet = self.generate_manual_wisdom(haber, balina)
+            if tweet:
+                print(f"\n📜 HOCA'NIN YORUMU:\n{tweet}")
+                onay = input("\nTwitter'da paylaşılsın mı? (e/h): ")
+                if onay.lower() == 'e':
+                    twitter.create_tweet(text=tweet)
+                    logger.info("Tweet paylaşıldı.")
+                
+            # Arada mentionları da kontrol et
             self.check_mentions()
             
-            # Her 2 saatte bir genel piyasa yorumu atar
-            now = time.time()
-            if now - last_wisdom_time > 7200:
-                tweet = self.generate_wisdom_tweet()
-                if tweet:
-                    twitter.create_tweet(text=tweet)
-                    logger.info(f"Genel tweet atıldı: {tweet}")
-                    last_wisdom_time = now
-            
-            time.sleep(120) # 2 dakikada bir kontrol et
+            devam = input("\nYeni bir yorum yapmak istiyor musun? (e/h): ")
+            if devam.lower() != 'e':
+                break
 
 if __name__ == "__main__":
     agent = KriptoHocaAgent()
-    agent.run()
+    # Botu manuel modda başlatıyoruz
+    agent.run_manual_mode()
