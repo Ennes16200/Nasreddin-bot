@@ -3,85 +3,105 @@
 
 import os
 import time
-import json
 import random
 import logging
-import psutil
 import requests
-from datetime import datetime, timedelta
-from openai import OpenAI
 import tweepy
+from datetime import datetime
+from openai import OpenAI
 
-# =========================
-# CONFIG
-# =========================
+# ========= LOG =========
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-TW_API_KEY = os.getenv("TW_API_KEY")
-TW_API_SECRET = os.getenv("TW_API_SECRET")
-TW_ACCESS_TOKEN = os.getenv("TW_ACCESS_TOKEN")
-TW_ACCESS_SECRET = os.getenv("TW_ACCESS_SECRET")
+# ========= OPENAI =========
+client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-RESTART_INTERVAL = 60 * 60 * 6
-MAX_MEMORY_MB = 450
-TWEET_LIMIT_PER_HOUR = 10
-PERSONA_FILE = "persona.json"
-
-LOOP_MIN = 1800
-LOOP_MAX = 7200
-
-# =========================
-# LOGGING
-# =========================
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+# ========= TWITTER =========
+twitter = tweepy.Client(
+    bearer_token=os.getenv("TWITTER_BEARER"),
+    consumer_key=os.getenv("TWITTER_API_KEY"),
+    consumer_secret=os.getenv("TWITTER_API_SECRET"),
+    access_token=os.getenv("TWITTER_ACCESS_TOKEN"),
+    access_token_secret=os.getenv("TWITTER_ACCESS_SECRET"),
 )
 
-# =========================
-# OPENAI
-# =========================
+# ========= NFT DATA =========
+COLLECTIONS = [
+    "boredapeyachtclub",
+    "azuki",
+    "doodles-official",
+    "pudgypenguins"
+]
 
-client_ai = OpenAI(api_key=OPENAI_API_KEY)
+def get_real_floor():
+    try:
+        slug = random.choice(COLLECTIONS)
+        url = f"https://api.opensea.io/api/v2/collections/{slug}/stats"
+        r = requests.get(url)
+        data = r.json()
+        floor = data["stats"]["floor_price"]
+        volume = data["stats"]["total_volume"]
+        return slug, floor, volume
+    except:
+        # API başarısız olursa rastgele floor ve volume
+        slug = random.choice(COLLECTIONS)
+        floor = round(random.uniform(0.3,1.7),2)
+        volume = round(random.uniform(100,10000),0)
+        return slug, floor, volume
 
-# =========================
-# TWITTER
-# =========================
+# ========= WHALE ANALYZER =========
+def whale_signal(volume):
+    score = 0
+    if volume > 5000:
+        score += 2
+    if random.random() > 0.7:
+        score += 1
+    signals = [
+        "balinalar sessizce topluyor",
+        "dump hazırlığı kokusu var",
+        "hacim köpürmüş gibi",
+        "likidite oyunları dönüyor"
+    ]
+    return score, random.choice(signals)
 
-client_twitter = tweepy.Client(
-    consumer_key=TW_API_KEY,
-    consumer_secret=TW_API_SECRET,
-    access_token=TW_ACCESS_TOKEN,
-    access_token_secret=TW_ACCESS_SECRET
-)
+# ========= TREND ENGINE =========
+def trend_prediction(floor, whale_score):
+    trend = floor * random.uniform(0.8,1.2) + whale_score
+    if trend > 3:
+        return "Yükseliş ihtimali güçlü"
+    elif trend > 1.5:
+        return "Dalgalı ama umut var"
+    else:
+        return "Hoca eşeğe binmez bu piyasada"
 
-# =========================
-# MEMORY GUARD
-# =========================
+# ========= AI TWEET =========
+def generate_tweet():
+    slug, floor, volume = get_real_floor()
+    whale_score, whale_text = whale_signal(volume)
+    trend = trend_prediction(floor, whale_score)
 
-def memory_guard():
-    mem = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
-    if mem > MAX_MEMORY_MB:
-        logging.warning("Memory exceeded -> Restarting")
-        os._exit(1)
+    prompt = f"""
+Sen Nasreddin Hoca ruhuna sahip kripto filozofu AI'sın.
+NFT Koleksiyon: {slug}
+Floor: {floor}
+Hacim: {volume}
+Whale analiz: {whale_text}
+Trend tahmini: {trend}
+Türk mizahı, zeka ve taşlama içeren tweet yaz. Max 260 karakter.
+"""
 
-# =========================
-# WATCHDOG
-# =========================
+    response = client_ai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role":"user","content":prompt}],
+        max_completion_tokens=120
+    )
 
-start_time = time.time()
+    return response.choices[0].message.content.strip()
 
-def restart_watchdog():
-    if time.time() - start_time > RESTART_INTERVAL:
-        logging.info("Scheduled restart")
-        os._exit(1)
-
-# =========================
-# RATE LIMIT
-# =========================
-
+# ========= TWEET GUARD =========
 tweet_times = []
+TWEET_LIMIT_PER_HOUR = 10
 
 def can_tweet():
     global tweet_times
@@ -92,114 +112,45 @@ def can_tweet():
         return True
     return False
 
-# =========================
-# PERSONA MEMORY
-# =========================
-
-def load_persona():
-    if os.path.exists(PERSONA_FILE):
-        with open(PERSONA_FILE,"r") as f:
-            return json.load(f)
-    return {"history":[]}
-
-def save_persona(p):
-    with open(PERSONA_FILE,"w") as f:
-        json.dump(p,f)
-
-persona = load_persona()
-
-# =========================
-# DATA SOURCES
-# =========================
-
-def get_gold_price():
-    try:
-        r = requests.get("https://api.metals.live/v1/spot/gold")
-        return float(r.json()[0]["price"])
-    except:
-        return None
-
-def get_nft_floor():
-    # Buraya OpenSea API ekleyebiliriz
-    return round(random.uniform(0.3, 1.7),2)
-
-# =========================
-# AI ENGINE
-# =========================
-
-def generate_tweet(gold, nft):
-
-    system_prompt = """
-Sen Nasreddin Hoca tarzında konuşan,
-NFT bilen,
-Kripto kültürüne hakim,
-Türk mizahı yapan,
-Altın ve BIST yorumlayan
-bilge bir trader karakterisin.
-"""
-
-    user_prompt = f"""
-Altın fiyatı: {gold}
-NFT floor: {nft}
-Buna göre 280 karakterlik eğlenceli tweet yaz.
-"""
-
-    response = client_ai.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role":"system","content":system_prompt},
-            {"role":"user","content":user_prompt}
-        ],
-        max_completion_tokens=300
-    )
-
-    return response.choices[0].message.content.strip()
-
-# =========================
-# TWEET
-# =========================
-
 def send_tweet(text):
-    if not can_tweet():
-        logging.info("Rate limit reached")
-        return
+    if can_tweet():
+        try:
+            twitter.create_tweet(text=text)
+            logger.info("Tweet sent: %s", text)
+        except Exception as e:
+            logger.error("Twitter fail: %s", e)
+    else:
+        logger.info("Rate limit reached, tweet skipped")
 
-    try:
-        client_twitter.create_tweet(text=text)
-        logging.info("Tweet sent")
-    except Exception as e:
-        logging.error(f"Twitter error: {e}")
+# ========= WATCHDOG =========
+start_time = time.time()
+RESTART_INTERVAL = 60*60*6
+MAX_MEMORY_MB = 450
+import psutil
 
-# =========================
-# MAIN LOOP
-# =========================
+def memory_guard():
+    mem = psutil.Process(os.getpid()).memory_info().rss / 1024 /1024
+    if mem > MAX_MEMORY_MB:
+        logger.warning("Memory exceeded -> Restarting")
+        os._exit(1)
 
-logging.info("BOT STARTED")
+def restart_watchdog():
+    if time.time() - start_time > RESTART_INTERVAL:
+        logger.info("Scheduled restart")
+        os._exit(1)
+
+# ========= MAIN LOOP =========
+logger.info("NFT/AI Twitter Bot STARTED")
 
 while True:
     try:
         restart_watchdog()
         memory_guard()
-
-        gold = get_gold_price()
-        nft = get_nft_floor()
-
-        if gold is None:
-            gold = "veri yok"
-
-        tweet_text = generate_tweet(gold, nft)
-
+        tweet_text = generate_tweet()
         send_tweet(tweet_text)
-
-        persona["history"].append(tweet_text)
-        persona["history"] = persona["history"][-20:]
-        save_persona(persona)
-
-        wait_time = random.randint(LOOP_MIN, LOOP_MAX)
-        logging.info(f"Sleeping {wait_time} seconds")
-
-        time.sleep(wait_time)
-
+        wait = random.randint(1800,7200)
+        logger.info(f"{wait} saniye bekleniyor")
+        time.sleep(wait)
     except Exception as e:
-        logging.error(f"Crash caught: {e}")
+        logger.error("Crash caught: %s", e)
         time.sleep(30)
