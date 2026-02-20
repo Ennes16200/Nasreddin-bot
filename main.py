@@ -1,145 +1,116 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import tweepy
+import os
 import time
 import random
 import logging
 from datetime import datetime
+
+import tweepy
 from openai import OpenAI
 
-# ================= LOGGING =================
 
+# ---------------- LOGGING ----------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# ================= AI SETUP =================
-import os
+
+# ---------------- API CLIENTS ----------------
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-PERSONA = """
-Sen Nasreddin Hoca ruhuna sahip,
-kripto bilen,
-NFT projelerini yorumlayan,
-Türk mizahını kullanan,
-absürt ama zeki,
-viral tweet yazabilen bir AI karakterisin.
+twitter = tweepy.Client(
+    bearer_token=os.getenv("TW_BEARER"),
+    consumer_key=os.getenv("TW_API_KEY"),
+    consumer_secret=os.getenv("TW_API_SECRET"),
+    access_token=os.getenv("TW_ACCESS_TOKEN"),
+    access_token_secret=os.getenv("TW_ACCESS_SECRET"),
+)
+
+
+# ---------------- CHARACTER PROMPT ----------------
+SYSTEM_PROMPT = """
+Sen Nasreddin Hoca tarzında konuşan bir AI karakterisin.
+
+Kişiliğin:
+- Türk mizahı
+- Kripto bilgili
+- NFT kültürüne hakim
+- Hafif taşlayıcı
+- Zeki ve kısa tweet üretir
 
 Kurallar:
-- Mizah kullan
-- Punchline ile bitir
-- Kripto jargon bil
-- NFT hype analiz yap
-- Rugpull uyarısı yap
-- Samimi Türkçe konuş
-- Kısa tweet formatında yaz
+- 1 tweet uzunluğu
+- Türkçe yaz
+- Komik ol
+- Hashtag kullan (#crypto #nft #NasreddinAI)
+- Emoji olabilir
 """
 
-MOODS = [
-    "bilge",
-    "troll",
-    "shitposter",
-    "filozof",
-    "kripto gurusu"
-]
 
-TOPIC_POOL = [
-    "NFT piyasası",
-    "Yeni mint projeleri",
-    "Ethereum gas fee",
-    "Bitcoin yükselişi",
-    "Metaverse",
-    "DAO kültürü",
-    "JPEG yatırımcıları",
-    "Balinalar",
-    "Shitcoin sezonu",
-    "Airdrop avcıları"
-] * 20   # 200 fikir
+# ---------------- AI TWEET GENERATOR ----------------
+def generate_tweet():
 
-# ================= BOT CLASS =================
+    topic = random.choice([
+        "Bitcoin düşüşü",
+        "NFT koleksiyonu",
+        "Kripto balinaları",
+        "Altcoin sezonu",
+        "Metaverse",
+        "DeFi",
+        "Yeni NFT projeleri",
+        "Web3 geleceği",
+        "Pump dump olayları",
+        "Airdrop kovalamak"
+    ])
 
-class NasreddinAIBot:
-
-    def __init__(self):
-
-        self.memory = []
-
-        # TWITTER KEYS
-        self.client = tweepy.Client(
-            bearer_token="BEARER_TOKEN",
-            consumer_key="API_KEY",
-            consumer_secret="API_SECRET",
-            access_token="ACCESS_TOKEN",
-            access_token_secret="ACCESS_TOKEN_SECRET"
+    try:
+        response = client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"{topic} hakkında tweet üret"}
+            ],
+            max_tokens=80
         )
 
-    # ---------- AI GENERATE ----------
-    def ai_generate(self):
+        tweet = response.choices[0].message.content.strip()
+        return tweet
 
-        mood = random.choice(MOODS)
-        topic = random.choice(TOPIC_POOL)
-
-        prompt = f"""
-Ruh hali: {mood}
-Konu: {topic}
-
-Tweet yaz.
-"""
-
-        try:
-            response = client.chat.completions.create(
-                model="gpt-5",
-                messages=[
-                    {"role":"system","content":PERSONA},
-                    {"role":"user","content":prompt}
-                ],
-                temperature=0.9
-            )
-
-            text = response.choices[0].message.content
-            self.remember(text)
-            return text
-
-        except Exception as e:
-            logger.error(e)
-            return "Bugün göle maya tuttum, API tutmadı."
-
-    # ---------- MEMORY ----------
-    def remember(self, msg):
-        self.memory.append(msg)
-        if len(self.memory) > 15:
-            self.memory.pop(0)
-
-    # ---------- POST ----------
-    def post(self):
-
-        tweet = self.ai_generate()
-
-        try:
-            self.client.create_tweet(text=tweet)
-            logger.info("Tweet gönderildi")
-
-        except Exception as e:
-            logger.error(e)
-
-    # ---------- LOOP ----------
-    def run(self):
-
-        logger.info("AI Nasreddin başladı")
-
-        while True:
-            self.post()
-
-            wait = random.randint(14400,21600)
-            logger.info(f"{wait} saniye bekleniyor")
-            time.sleep(wait)
+    except Exception as e:
+        logger.error(f"AI üretim hatası: {e}")
+        return None
 
 
-# ================= START =================
+# ---------------- SEND TWEET ----------------
+def send_tweet(text):
+    try:
+        twitter.create_tweet(text=text)
+        logger.info("Tweet atıldı:")
+        logger.info(text)
 
+    except Exception as e:
+        logger.error(f"Tweet gönderme hatası: {e}")
+
+
+# ---------------- LOOP ----------------
+def run_bot():
+    logger.info("Bot başlatıldı 🚀")
+
+    while True:
+        tweet = generate_tweet()
+
+        if tweet:
+            send_tweet(tweet)
+
+        wait = random.randint(14400, 21600)  # 4-6 saat
+        logger.info(f"{wait} saniye bekleniyor...")
+        time.sleep(wait)
+
+
+# ---------------- START ----------------
 if __name__ == "__main__":
-    bot = NasreddinAIBot()
-    bot.run()
+    run_bot()
