@@ -7,7 +7,7 @@ import random
 import logging
 import requests
 import tweepy
-from datetime import datetime
+from datetime import datetime, timedelta
 from openai import OpenAI
 
 # ========= LOG =========
