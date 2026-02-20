@@ -15,31 +15,29 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # ========= API İSTEMCİLERİ =========
-client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Not: Bu değerleri ortam değişkeni (env) olarak tanımlamanız önerilir.
+client_ai = OpenAI(api_key="OPENAI_API_KEY_BURAYA")
 
 twitter = tweepy.Client(
-    bearer_token=os.getenv("TWITTER_BEARER"),
-    consumer_key=os.getenv("TWITTER_API_KEY"),
-    consumer_secret=os.getenv("TWITTER_API_SECRET"),
-    access_token=os.getenv("TWITTER_ACCESS_TOKEN"),
-    access_token_secret=os.getenv("TWITTER_ACCESS_SECRET"),
+    bearer_token="BEARER_TOKEN_BURAYA",
+    consumer_key="API_KEY_BURAYA",
+    consumer_secret="API_SECRET_BURAYA",
+    access_token="ACCESS_TOKEN_BURAYA",
+    access_token_secret="ACCESS_SECRET_BURAYA",
 )
 
-# ========= AYARLAR =========
-COLLECTIONS = ["boredapeyachtclub", "azuki", "pudgypenguins"]
-
+# ========= KRIPTO HOCA AGENT =========
 class KriptoHocaAgent:
     def __init__(self, name="KriptoHoca"):
         self.name = name
         self.tweet_times = []
         self.TWEET_LIMIT_PER_HOUR = 5
 
-    # --- GÜVENLİK MÜFETTİŞİ (GoPlus API) ---
     def check_security(self, chain_id, contract_address):
-        """
-        Yeni projenin kontratını tarar. 
-        chain_id: 1 (ETH), 56 (BSC), 137 (Polygon), 8453 (Base)
-        """
+        """GoPlus Security API kullanarak kontratı tarar."""
+        if not contract_address or contract_address == "N/A":
+            return "Yeni bir kazan doğmuş ama henüz mühürlerini (kontratını) göremedim."
+            
         try:
             url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={contract_address}"
             res = requests.get(url, timeout=10).json()
@@ -47,37 +45,41 @@ class KriptoHocaAgent:
                 data = res["result"][contract_address.lower()]
                 
                 risks = []
-                if data.get("is_honeypot") == "1": risks.append("BAL KÜPÜ (Honeypot) TUZAĞI! Parayı koyan geri alamaz.")
-                if data.get("is_mintable") == "1": risks.append("SINIRSIZ BASKI (Mintable)! Sahibi kafasına göre para basar.")
-                if data.get("cannot_buy") == "1" or data.get("cannot_sell") == "1": risks.append("ALIM-SATIM KİLİDİ! Kazan mühürlü.")
+                if data.get("is_honeypot") == "1": risks.append("BAL KÜPÜ (Honeypot) TUZAĞI!")
+                if data.get("is_mintable") == "1": risks.append("SINIRSIZ BASKI (Mintable)!")
+                if data.get("cannot_buy") == "1" or data.get("cannot_sell") == "1": risks.append("ALIM-SATIM KİLİDİ!")
                 
                 if not risks:
                     return "Sözleşme temiz görünüyor, ama yine de eşeği sağlam kazığa bağlayın."
                 return " | ".join(risks)
-        except:
+        except Exception as e:
+            logger.error(f"Güvenlik tarama hatası: {e}")
             return "Sözleşme mühürlerini sökemedim, karanlık işler dönüyor olabilir."
         return "İnceleme yapılamadı."
 
-    # --- PİYASA & TREND VERİSİ ---
-        def get_market_wisdom(self):
+    def get_market_wisdom(self):
+        """Piyasa verilerini ve trendleri toplar."""
         try:
-            # 1. Fiyatlar (Binance) - Daha güvenli veri çekme
+            # 1. Fiyatlar (Binance)
             btc_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT").json()
             gold_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT").json()
             
-            # API bazen liste bazen sözlük dönebilir, ikisini de kapsayalım
-            btc = btc_res.get('price') if isinstance(btc_res, dict) else btc_res[0]['price']
-            gold = gold_res.get('price') if isinstance(gold_res, dict) else gold_res[0]['price']
+            btc = btc_res.get('price', '0')
+            gold = gold_res.get('price', '0')
 
             # 2. Trend Projeler (CoinGecko)
             t_res = requests.get("https://api.coingecko.com/api/v3/search/trending").json()
-            # Trend listesi boş olabilir, kontrol ekleyelim
             if not t_res.get('coins'):
                 return None
                 
             top_coin = t_res['coins'][0]['item']
             coin_name = top_coin['name']
+            # Trend coinlerin kontrat adresini almaya çalışalım (varsa)
+            contract_addr = top_coin.get('native_slug', 'N/A') 
             
+            # Güvenlik kontrolü (Örnek olarak Ethereum/1 ağında tarıyoruz)
+            security_report = self.check_security("1", contract_addr)
+
             # 3. Korku Endeksi
             f_res = requests.get("https://api.alternative.me/fng/").json()
             fng = f_res['data'][0]['value']
@@ -87,25 +89,24 @@ class KriptoHocaAgent:
                 "btc": round(float(btc), 2),
                 "gold": round(float(gold), 2),
                 "trend": coin_name,
-                "security": "Yeni bir kazan doğmuş, mühürleri inceleniyor...",
+                "security": security_report,
                 "mood": f"{mood} ({fng}/100)"
             }
         except Exception as e:
-            logger.error("Veri hatası detayı: %s", e) # Hatayı daha detaylı görmek için
+            logger.error(f"Veri toplama hatası: {e}")
             return None
-            
 
-    # --- AI TWEET GENERATOR ---
     def generate_wisdom_tweet(self):
+        """Hoca'nın ağzından tweet üretir."""
         wisdom = self.get_market_wisdom()
         if not wisdom: return None
 
         prompt = f"""
 Sen Nasreddin Hoca'sın. Elindeki veriler:
 - Bitcoin: {wisdom['btc']}$
-- Altın (PAXG): {wisdom['gold']}$
-- Yeni Proje: {wisdom['trend']}
-- Güvenlik Raporu: {wisdom['security']}
+- Altın: {wisdom['gold']}$
+- Yeni Trend Proje: {wisdom['trend']}
+- Güvenlik Durumu: {wisdom['security']}
 - Piyasa Hissi: {wisdom['mood']}
 
 Görev:
@@ -120,11 +121,12 @@ kripto dünyasını iğneleyen bilgece ve komik bir Türkçe tweet yaz. Max 240 
                           {"role": "user", "content": prompt}]
             )
             return response.choices[0].message.content.strip()
-        except:
+        except Exception as e:
+            logger.error(f"AI Tweet üretim hatası: {e}")
             return None
 
-    # --- TWEET GÖNDER ---
     def send_tweet(self, text):
+        """Tweeti Twitter'a gönderir."""
         now = datetime.now()
         self.tweet_times = [t for t in self.tweet_times if now - t < timedelta(hours=1)]
         
@@ -132,16 +134,17 @@ kripto dünyasını iğneleyen bilgece ve komik bir Türkçe tweet yaz. Max 240 
             try:
                 twitter.create_tweet(text=text)
                 self.tweet_times.append(now)
-                logger.info("Tweet Başarılı: %s", text)
+                logger.info(f"Tweet Başarılı: {text}")
             except Exception as e:
-                logger.error("Twitter Hatası: %s", e)
+                logger.error(f"Twitter API Hatası: {e}")
 
-    # --- ANA DÖNGÜ ---
     def run(self):
+        """Ana döngü."""
         logger.info("=== Hoca Piyasaya İndi! ===")
         while True:
             tweet = self.generate_wisdom_tweet()
-            self.send_tweet(tweet)
+            if tweet:
+                self.send_tweet(tweet)
             
             # 1-3 saat arası rastgele bekleme
             wait = random.randint(3600, 10800)
