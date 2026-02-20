@@ -1,9 +1,17 @@
-python-telegram-bot[job-queue]>=20.0
-openai>=1.0.0
+# Temel Bağlantılar
+tweepy>=4.14.0
 requests>=2.28.0
+python-dotenv
+
+# Yapay Zeka ve API (İlerisi için)
+openai>=1.0.0
+python-telegram-bot[job-queue]>=20.0
+
+# Zamanlama ve Asenkron İşlemler
+apscheduler
+asyncio
+
+# Web ve Sunucu (Opsiyonel)
 fastapi>=0.100.0
 uvicorn>=0.22.0
 pydantic>=2.0.0
-tweepy>=4.14.0
-apscheduler
-python-dotenv
