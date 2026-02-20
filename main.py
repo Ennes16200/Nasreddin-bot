@@ -13,6 +13,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # ========= API İSTEMCİLERİ =========
+# Ortam değişkenlerinden API anahtarlarını alıyoruz
 client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 twitter = tweepy.Client(
@@ -35,7 +36,7 @@ class KriptoHocaAgent:
             logger.error(f"Twitter girişi başarısız: {e}")
 
     def check_security(self, chain_id, contract_address):
-        """Güvenlik taraması yapar."""
+        """Token güvenlik taraması yapar."""
         if not contract_address or contract_address == "N/A":
             return "Yeni bir kazan doğmuş ama mühürleri belirsiz."
         try:
@@ -52,9 +53,9 @@ class KriptoHocaAgent:
         return "İnceleme yapılamadı."
 
     def get_market_wisdom(self):
-        """Piyasa verilerini toplar (Hata korumalı)."""
+        """Piyasa verilerini toplar (Hata korumalı ve yedekli)."""
         try:
-            # 1. Fiyat Verisi
+            # 1. Fiyat Verisi (Binance + CoinGecko yedeği)
             btc_price = "0"
             try:
                 btc_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10).json()
@@ -94,21 +95,31 @@ class KriptoHocaAgent:
             return None
 
     def generate_wisdom_tweet(self):
-        """Genel tweet üretir."""
+        """Genel piyasa tweeti üretir."""
         w = self.get_market_wisdom()
         if not w: return None
-        prompt = f"BTC: {w['btc']}$, Trend: {w['trend']}, Güvenlik: {w['security']}, Korku: {w['fng']}/100. Nasreddin Hoca olarak iğneleyici, fıkra temalı bir Türkçe tweet yaz (Max 240 karakter)."
+        
+        # Prompt güncellendi: İsim etiketi yasaklandı ve yaratıcılık eklendi.
+        prompt = (f"BTC: {w['btc']}$, Trend: {w['trend']}, Güvenlik: {w['security']}, Korku: {w['fng']}/100. "
+                  f"Nasreddin Hoca olarak iğneleyici, fıkra temalı bir Türkçe tweet yaz. "
+                  f"ÖNEMLİ: Cevaba asla 'Nasreddin Hoca:' veya 'Hoca:' gibi isim etiketleri ekleme, doğrudan cümleye baş. "
+                  f"Sürekli aynı hitapları kullanma, yaratıcı ol. (Max 240 karakter).")
+        
         try:
             response = client_ai.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{"role": "system", "content": "Sen bilge Nasreddin Hoca'sın."}, {"role": "user", "content": prompt}]
+                messages=[{"role": "system", "content": "Sen bilge ve iğneleyici Nasreddin Hoca'sın."}, {"role": "user", "content": prompt}]
             )
             return response.choices[0].message.content.strip()
         except: return None
 
     def generate_reply(self, user_tweet):
-        """Mention yanıtı üretir."""
-        prompt = f"Kullanıcı: '{user_tweet}'. Nasreddin Hoca olarak bilgece, fıkra elementli ve kripto jargonlu komik bir cevap ver (Max 200 karakter)."
+        """Mention (etiketleme) yanıtı üretir."""
+        # Prompt güncellendi: İsim etiketi yasaklandı ve doğrudan konuşma istendi.
+        prompt = (f"Kullanıcı sana şunu dedi: '{user_tweet}'. Nasreddin Hoca olarak bilgece, fıkra elementli ve kripto jargonlu komik bir cevap ver. "
+                  f"ÖNEMLİ: Cevabın başına asla 'Nasreddin Hoca:' veya isim yazma, doğrudan konuşmaya baş. "
+                  f"Sürekli 'Evladım' deme, farklı ve bilgece hitaplar kullan. (Max 200 karakter).")
+        
         try:
             response = client_ai.chat.completions.create(
                 model="gpt-4o-mini",
@@ -118,7 +129,7 @@ class KriptoHocaAgent:
         except: return None
 
     def check_mentions(self):
-        """Mention'ları kontrol eder."""
+        """Gelen mention'ları kontrol eder ve yanıtlar."""
         if not self.me: return
         try:
             mentions = twitter.get_users_mentions(id=self.me.id, since_id=self.last_mention_id)
@@ -128,25 +139,28 @@ class KriptoHocaAgent:
                 reply = self.generate_reply(tweet.text)
                 if reply:
                     twitter.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
-                    logger.info(f"Yanıtlandı: {tweet.text}")
-                time.sleep(5)
+                    logger.info(f"Yanıtlandı: {tweet.text} -> {reply}")
+                time.sleep(5) # Twitter spam filtresine takılmamak için kısa bekleme
         except Exception as e:
             logger.error(f"Mention hatası: {e}")
 
     def run(self):
-        """Ana döngü."""
+        """Botun ana döngüsü."""
         logger.info("=== Hoca Piyasaya İndi! ===")
         last_wisdom_time = 0
         while True:
             self.check_mentions()
+            
+            # Her 2 saatte bir genel piyasa yorumu atar
             now = time.time()
             if now - last_wisdom_time > 7200:
                 tweet = self.generate_wisdom_tweet()
                 if tweet:
                     twitter.create_tweet(text=tweet)
-                    logger.info(f"Tweet atıldı: {tweet}")
+                    logger.info(f"Genel tweet atıldı: {tweet}")
                     last_wisdom_time = now
-            time.sleep(120)
+            
+            time.sleep(120) # 2 dakikada bir kontrol et
 
 if __name__ == "__main__":
     agent = KriptoHocaAgent()
