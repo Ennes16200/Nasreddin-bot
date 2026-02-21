@@ -71,7 +71,7 @@ class KriptoHocaAgent:
             fng_res = requests.get("https://api.alternative.me/fng/", timeout=15).json()
             fng = fng_res.get('data', [{}])[0].get('value', "50")
 
-            # 3. Trend Coinler (Haber yerine)
+            # 3. Trend Coinler
             news_res = requests.get("https://api.coingecko.com/api/v3/search/trending", timeout=15).json()
             trending = [t['item']['symbol'] for t in news_res.get('coins', [])[:3]]
             
@@ -88,7 +88,7 @@ class KriptoHocaAgent:
     def generate_and_post(self):
         """Piyasa yorumu tweeti atar."""
         w = self.get_market_wisdom()
-        if not w: return # Veri yoksa tweet yok
+        if not w: return 
 
         prompt = (f"VERİLER: BTC {w['btc']} USD, Korku {w['fng']}/100, Trendler: {w['news']}. "
                   "TALİMAT: Bu rakamları asla değiştirme. Nasreddin Hoca olarak bilgece ve iğneleyici "
@@ -101,7 +101,7 @@ class KriptoHocaAgent:
                     {"role": "system", "content": "Sen verilere sadık kalan Nasreddin Hoca'sın."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.6 # Rakamları bozmaması için yaratıcılığı sınırladık
+                temperature=0.6
             )
             tweet = response.choices[0].message.content.strip()
             twitter.create_tweet(text=tweet)
@@ -113,32 +113,56 @@ class KriptoHocaAgent:
         """Mentionları kontrol eder ve sadece yenileri yanıtlar."""
         if not self.me: return
         try:
-            params = {"id": self.me.id, "max_results": 10}
+            params = {
+                "id": self.me.id, 
+                "max_results": 10,
+                "tweet_fields": ["author_id"]
+            }
+            # Sadece son kaldığımız ID'den sonrasını iste
             if self.last_mention_id:
                 params["since_id"] = self.last_mention_id
 
             mentions = twitter.get_users_mentions(**params)
-            if not mentions or not mentions.data: return
             
-            for tweet in reversed(mentions.data):
-                # Aynı tweet'e tekrar yanıt vermeyi engellemek için çift kontrol
+            if not mentions or not mentions.data: 
+                return
+            
+            # Tweetleri eskiden yeniye doğru işle (ID sırasına göre)
+            sorted_mentions = sorted(mentions.data, key=lambda x: x.id)
+            
+            for tweet in sorted_mentions:
+                # Kendi tweetlerimize cevap vermeyelim
+                if tweet.author_id == self.me.id:
+                    continue
+
+                # Çift kontrol: Eğer ID zaten işlendiyse atla
                 if self.last_mention_id and tweet.id <= self.last_mention_id:
                     continue
 
-                prompt = f"Kullanıcı: '{tweet.text}'. Nasreddin Hoca olarak kısa ve bilgece bir cevap ver."
-                response = client_ai.chat.create(
+                logger.info(f"Yeni mention: {tweet.id} - İçerik: {tweet.text}")
+
+                prompt = f"Kullanıcı şunu sordu/dedi: '{tweet.text}'. Nasreddin Hoca olarak kısa, bilgece ve esprili bir cevap ver."
+                
+                response = client_ai.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=[{"role": "system", "content": "Sen Nasreddin Hoca'sın."}, {"role": "user", "content": prompt}]
+                    messages=[
+                        {"role": "system", "content": "Sen Nasreddin Hoca'sın. Kısa ve öz cevap verirsin."},
+                        {"role": "user", "content": prompt}
+                    ]
                 )
                 reply = response.choices[0].message.content.strip()
                 
+                # Yanıtı gönder
                 twitter.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
-                self.save_last_id(tweet.id) # Her yanıttan sonra ID'yi kaydet
+                
+                # ID'yi güncelle ve dosyaya yaz
+                self.save_last_id(tweet.id)
+                
                 logger.info(f"Yanıtlandı: {tweet.id} -> {reply}")
-                time.sleep(2) # Twitter spam filtresine takılmamak için
+                time.sleep(5) # Spam koruması
                 
         except Exception as e:
-            logger.debug(f"Mention kontrolü: {e}")
+            logger.error(f"Mention kontrol hatası: {e}")
 
     def run(self):
         """Ana döngü."""
@@ -147,12 +171,12 @@ class KriptoHocaAgent:
             self.check_mentions()
             
             now = time.time()
-            # 4 saatte bir tweet at (14400 saniye)
+            # 4 saatte bir piyasa yorumu at
             if now - last_tweet_time > 14400:
                 self.generate_and_post()
                 last_tweet_time = now
             
-            time.sleep(60) # Dakikada bir kontrol et
+            time.sleep(60) # Dakikada bir mention kontrolü
 
 if __name__ == "__main__":
     agent = KriptoHocaAgent()
