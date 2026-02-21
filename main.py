@@ -24,54 +24,63 @@ twitter = tweepy.Client(
 )
 
 class KriptoHocaAgent:
-    def __init__(self, name="KriptoHoca"):
-        self.name = name
+    def __init__(self):
         self.last_mention_id = None
         self.me = None
         try:
             self.me = twitter.get_me().data
-            logger.info(f"Hoca sisteme giriş yaptı: @{self.me.username}")
+            logger.info(f"Hoca Render Kürsüsünde: @{self.me.username}")
         except Exception as e:
-            logger.error(f"Twitter girişi başarısız: {e}")
-
-    def check_security(self, chain_id, contract_address):
-        """Token güvenlik taraması yapar."""
-        if not contract_address or contract_address == "N/A":
-            return "Yeni bir kazan doğmuş ama mühürleri belirsiz."
-        try:
-            url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={contract_address}"
-            res = requests.get(url, timeout=10).json()
-            if res.get("code") == 1 and res.get("result"):
-                data = res["result"].get(contract_address.lower(), {})
-                risks = []
-                if data.get("is_honeypot") == "1": risks.append("BAL KÜPÜ!")
-                if data.get("is_mintable") == "1": risks.append("SINIRSIZ BASKI!")
-                return " | ".join(risks) if risks else "Sözleşme temiz."
-        except:
-            return "Mühürler sökülemedi."
-        return "İnceleme yapılamadı."
+            logger.error(f"Twitter Giriş Hatası: {e}")
 
     def get_market_wisdom(self):
-        """Piyasa verilerini toplar."""
+        """Piyasa verilerini, haberleri ve balina hareketlerini toplar."""
+        data = {"btc": "Bilinmiyor", "fng": "50", "news": "Piyasa durgun", "whale": "Sakin"}
         try:
-            # 1. Fiyat Verisi
+            # 1. Fiyat Verisi (Binance)
             btc_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10).json()
-            btc_price = btc_res.get('price', "0")
+            data['btc'] = round(float(btc_res.get('price', 0)), 2)
 
             # 2. Korku Endeksi
             fng_res = requests.get("https://api.alternative.me/fng/", timeout=10).json()
-            fng = fng_res.get('data', [{}])[0].get('value', "50")
+            data['fng'] = fng_res.get('data', [{}])[0].get('value', "50")
 
-            return {"btc": round(float(btc_price), 2), "fng": fng}
+            # 3. Otomatik Haber Çekme (CryptoPanic veya benzeri bir API - Örnek simülasyon)
+            # Not: Burası manuel input yerine piyasadaki son dakika gelişmelerini simüle eder
+            news_res = requests.get("https://api.coingecko.com/api/v3/search/trending", timeout=10).json()
+            trending = [t['item']['name'] for t in news_res.get('coins', [])[:3]]
+            data['news'] = f"Trend olanlar: {', '.join(trending)}"
+
+            # 4. Balina Hareketi (Büyük hacimli değişimleri kontrol eder)
+            vol_res = requests.get("https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT", timeout=10).json()
+            if float(vol_res.get('priceChangePercent', 0)) > 3:
+                data['whale'] = "Sert hareketler var, balinalar suyu bulandırdı!"
+            else:
+                data['whale'] = "Balinalar derinde dinleniyor."
+                
+            return data
         except Exception as e:
             logger.error(f"Veri toplama hatası: {e}")
-            return {"btc": "Bilinmiyor", "fng": "50"}
+            return data
 
-    def generate_manual_wisdom(self, haber, balina):
-        """Senin verdiğin manuel verileri Hoca diliyle yorumlar."""
+    def check_security(self, chain_id, contract_address):
+        """Token güvenlik taraması (GoPlus API)"""
+        if not contract_address: return "Mühürsüz."
+        try:
+            url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={contract_address}"
+            res = requests.get(url, timeout=10).json()
+            if res.get("code") == 1:
+                details = res["result"].get(contract_address.lower(), {})
+                if details.get("is_honeypot") == "1": return "BAL KÜPÜ (Honeypot)!"
+                return "Sözleşme temiz görünüyor."
+        except:
+            return "Güvenlik taraması yapılamadı."
+
+    def generate_and_post(self):
+        """Verileri Hoca diliyle yorumlar ve paylaşır."""
         w = self.get_market_wisdom()
-        prompt = (f"Piyasa Durumu -> BTC: {w['btc']}$, Korku Endeksi: {w['fng']}/100. "
-                  f"GÜNCEL HABER: {haber}. BALİNA HAREKETİ: {balina}. "
+        prompt = (f"Piyasa Durumu -> BTC: {w['btc']}$, Korku: {w['fng']}/100. "
+                  f"HABER: {w['news']}. BALİNA: {w['whale']}. "
                   f"Nasreddin Hoca olarak bu durumu iğneleyici, fıkra temalı bir Türkçe tweet yaz. "
                   f"Asla 'Hoca:' gibi isim etiketleri kullanma. Doğrudan cümleye baş. (Max 240 karakter).")
         
@@ -80,20 +89,21 @@ class KriptoHocaAgent:
                 model="gpt-4o-mini",
                 messages=[{"role": "system", "content": "Sen bilge ve iğneleyici Nasreddin Hoca'sın."}, {"role": "user", "content": prompt}]
             )
-            return response.choices[0].message.content.strip()
+            tweet = response.choices[0].message.content.strip()
+            twitter.create_tweet(text=tweet)
+            logger.info(f"Tweet Paylaşıldı: {tweet}")
         except Exception as e:
-            logger.error(f"AI Yanıt Hatası: {e}")
-            return None
+            logger.error(f"AI veya Twitter Hatası: {e}")
 
     def check_mentions(self):
-        """Gelen mention'ları kontrol eder."""
+        """Gelen mention'ları kontrol eder ve yanıtlar."""
         if not self.me: return
         try:
             mentions = twitter.get_users_mentions(id=self.me.id, since_id=self.last_mention_id)
             if not mentions or not mentions.data: return
+            
             for tweet in mentions.data:
                 self.last_mention_id = tweet.id
-                # Mention yanıtı üretme
                 prompt = f"Kullanıcı: '{tweet.text}'. Nasreddin Hoca olarak kısa, komik ve bilgece bir cevap ver."
                 response = client_ai.chat.completions.create(
                     model="gpt-4o-mini",
@@ -103,32 +113,23 @@ class KriptoHocaAgent:
                 twitter.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
                 logger.info(f"Yanıtlandı: {reply}")
         except Exception as e:
-            logger.error(f"Mention hatası: {e}")
+            logger.debug(f"Mention kontrolü: {e}")
 
-    def run_manual_mode(self):
-        """Botu senin kontrolünde çalıştırır."""
-        logger.info("=== Hoca Manuel Kürsüde! ===")
+    def run(self):
+        """Render üzerinde sonsuz döngü."""
+        last_tweet_time = 0
         while True:
-            print("\n--- Yeni Tweet Hazırlığı ---")
-            haber = input("Haber (Boş bırakmak için Enter): ")
-            balina = input("Balina Hareketi (Boş bırakmak için Enter): ")
-            
-            tweet = self.generate_manual_wisdom(haber, balina)
-            if tweet:
-                print(f"\n📜 HOCA'NIN YORUMU:\n{tweet}")
-                onay = input("\nTwitter'da paylaşılsın mı? (e/h): ")
-                if onay.lower() == 'e':
-                    twitter.create_tweet(text=tweet)
-                    logger.info("Tweet paylaşıldı.")
-                
-            # Arada mentionları da kontrol et
+            # 1. Mentionları her dakika kontrol et
             self.check_mentions()
             
-            devam = input("\nYeni bir yorum yapmak istiyor musun? (e/h): ")
-            if devam.lower() != 'e':
-                break
+            # 2. Her 4 saatte bir (14400 sn) piyasa yorumu at
+            now = time.time()
+            if now - last_tweet_time > 14400:
+                self.generate_and_post()
+                last_tweet_time = now
+            
+            time.sleep(60) # Render'ı yormamak için 1 dk bekle
 
 if __name__ == "__main__":
     agent = KriptoHocaAgent()
-    # Botu manuel modda başlatıyoruz
-    agent.run_manual_mode()
+    agent.run()
