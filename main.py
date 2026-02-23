@@ -1,181 +1,115 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import os
 import time
 import logging
 import requests
-import hashlib
-import random
 import tweepy
-from datetime import datetime
 from openai import OpenAI
-from apscheduler.schedulers.background import BackgroundScheduler
 
-# ========= AYARLAR VE LOGLAMA =========
+# --- LOGLAMA AYARLARI ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-ID_FILE = "last_mention_id.txt"
+# --- API BAĞLANTILARI (Environment Variables) ---
+# Render üzerinde bu isimlerle tanımladığından emin ol!
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
+TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET")
+TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
+TWITTER_ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
+TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 
-# ========= MOLTLETS DÜNYASINA GİRİŞ FONKSİYONU =========
+# OpenAI İstemcisi
+client = OpenAI(api_key=OPENAI_API_KEY)
+
 def moltlets_dunyasına_gir(ajan_ismi, hoca_biosu):
-    """
-    Bu fonksiyon Moltlets API'sine gider ve sana o meşhur Claim Linkini getirir.
-    """
-    url = "https://moltlets.world/api/spawn" 
-    payload = {
-        "name": ajan_ismi,
-        "bio": hoca_biosu
-    }
+    """Moltlets API'sine bağlanır, hata alırsa botu durdurmaz."""
+    url = "https://moltlets.world/api/spawn"
+    payload = {"name": ajan_ismi, "bio": hoca_biosu}
     
     try:
         logger.info(f"--- {ajan_ismi} için Moltlets kapısı çalınıyor... ---")
-        response = requests.post(url, json=payload, timeout=15)
+        response = requests.post(url, json=payload, timeout=10)
         
-        # API bazen JSON yerine hata dönebilir, kontrol edelim
-        if response.status_code == 200 or response.status_code == 201:
+        if response.status_code == 200:
             data = response.json()
             if "claim_url" in data:
-                print("\n" + "="*50)
-                print("✅ MOLTLETS AJANI OLUŞTURULDU!")
-                print(f"👉 CLAIM LINKIN: {data['claim_url']}")
-                print("="*50)
-                print("Bu linke tıkla, Twitter handle'ını gir ve doğrula.\n")
+                print(f"\n✅ MOLTLETS BAŞARILI! Linkin: {data['claim_url']}\n")
                 return True
-            else:
-                logger.warning(f"Link anahtarı yanıtta bulunamadı: {data}")
         else:
-            logger.error(f"Moltlets API Hatası (Kod {response.status_code}): {response.text}")
-            
+            # Destan gibi hata almamak için sadece durum kodunu yazdırıyoruz
+            logger.warning(f"⚠️ Moltlets şu an yanıt vermiyor (Hata Kodu: {response.status_code}). Twitter moduna geçiliyor...")
     except Exception as e:
         logger.error(f"Moltlets bağlantı hatası: {e}")
     return False
 
-# ========= API İSTEMCİLERİ =========
-client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-twitter = tweepy.Client(
-    bearer_token=os.getenv("TWITTER_BEARER"),
-    consumer_key=os.getenv("TWITTER_API_KEY"),
-    consumer_secret=os.getenv("TWITTER_API_SECRET"),
-    access_token=os.getenv("TWITTER_ACCESS_TOKEN"),
-    access_token_secret=os.getenv("TWITTER_ACCESS_SECRET"),
-)
-
-class KriptoHocaUltimate:
+class NasreddinHocaBot:
     def __init__(self):
-        self.me = None
-        try:
-            self.me = twitter.get_me().data
-            if self.me:
-                logger.info(f"Hoca Kürsüde: @{self.me.username}")
-        except Exception as e:
-            logger.error(f"Twitter Giriş Hatası: {e}")
-
-        self.last_mention_id = self.get_last_tweet_id_from_profile()
-        
-        self.portfolio = {
-            "BTC": {"amount": 0.1, "buy_price": 68000.0},
-            "ETH": {"amount": 1.5, "buy_price": 1970.0},
-            "SOL": {"amount": 20.0, "buy_price": 85.0},
-            "SUI": {"amount": 1000.0, "buy_price": 0.9}
-        }
-        
-        self.system_prompt = (
-            "Sen Kripto Nasreddin Hoca'sın. Üslubun: 'Bre evlat', 'Cemaat-i Dijital', 'İlahi', 'Ya tutarsa'. "
-            "Türk mizahı kuvvetli, zeki ve nüktedan birisin. Kriptoyu mahalle kültürüyle yorumlarsın. "
-            "NFT'ye 'dijital parşömen', Airdrop'a 'bedava düdük', Staking'e 'kazığı çakmak' dersin. "
-            "SUI sorulunca mutlaka su/göl esprileri yap. Yatırım tavsiyesi değil, nasip tavsiyesi ver."
+        # Twitter API v2 Bağlantısı
+        self.twitter_client = tweepy.Client(
+            bearer_token=TWITTER_BEARER_TOKEN,
+            consumer_key=TWITTER_API_KEY,
+            consumer_secret=TWITTER_API_SECRET,
+            access_token=TWITTER_ACCESS_TOKEN,
+            access_token_secret=TWITTER_ACCESS_SECRET
         )
-
-    def get_last_tweet_id_from_profile(self):
-        if not self.me: return None
+        self.bot_id = None
         try:
-            my_tweets = twitter.get_users_tweets(id=self.me.id, max_results=5)
-            if my_tweets and my_tweets.data:
-                return my_tweets.data[0].id
-            return None
+            me = self.twitter_client.get_me()
+            self.bot_id = me.data.id
+            logger.info(f"Bot aktif! İsim: {me.data.name}")
         except Exception as e:
-            logger.error(f"Profil hafızası çekilemedi: {e}")
-            return None
+            logger.error(f"Twitter bağlantı hatası: {e}")
 
-    def save_last_id(self, tweet_id):
-        self.last_mention_id = tweet_id
+    def ai_yanit_olustur(self, tweet_metni, kullanici_adi):
+        """Nasreddin Hoca kişiliğiyle yanıt üretir."""
+        sistem_mesaji = (
+            "Sen 21. yüzyılda yaşayan, kripto paralardan anlayan Nasreddin Hoca'sın. "
+            "Esprili, bilge ve hafif iğneleyici bir dil kullan. Yanıtların kısa ve öz olsun. "
+            "Asla 'Nasreddin Hoca:' gibi ön ekler kullanma. Doğrudan söze gir."
+        )
         try:
-            with open(ID_FILE, "w") as f: f.write(str(tweet_id))
-        except: pass
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": sistem_mesaji},
+                    {"role": "user", "content": f"@{kullanici_adi} şunu dedi: {tweet_metni}. Ona bir hoca cevabı ver."}
+                ],
+                max_tokens=150
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"AI Yanıt Hatası: {e}")
+            return "Evlat, zihnim biraz karışık, sonra gel hele..."
 
-    def get_coin_price(self, symbol):
+    def mentionlari_kontrol_et(self):
+        """Gelen mentionları kontrol eder ve yanıtlar."""
         try:
-            sym = symbol.upper().replace("$", "").replace("USDT", "") + "USDT"
-            res = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={sym}", timeout=10).json()
-            return float(res['price'])
-        except: return None
-
-    def get_maya_score(self, coin_name):
-        seed = f"{coin_name.upper()}{datetime.now().strftime('%Y%m%d')}"
-        score = int(hashlib.md5(seed.encode()).hexdigest(), 16) % 100
-        price = self.get_coin_price(coin_name)
-        prompt = f"{coin_name} için maya skoru %{score}. Fiyat: {price if price else 'Yok'}. Esprili yorumla."
-        res = client_ai.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "system", "content": self.system_prompt}, {"role": "user", "content": prompt}])
-        return res.choices[0].message.content.strip()
-
-    def get_heybe_report(self):
-        current_total = 0
-        buy_total = sum(v["amount"] * v["buy_price"] for v in self.portfolio.values())
-        for coin, data in self.portfolio.items():
-            p = self.get_coin_price(coin) or data["buy_price"]
-            current_total += data["amount"] * p
-        change = ((current_total - buy_total) / buy_total) * 100
-        prompt = f"Heybe %{change:.2f} değişimde. BTC, ETH, SOL, SUI var. Türk mizahıyla bereket yorumu yap."
-        res = client_ai.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "system", "content": self.system_prompt}, {"role": "user", "content": prompt}])
-        return f"💰 HEYBE RAPORU (%{change:.2f})\n\n{res.choices[0].message.content.strip()[:240]}"
-
-    def reply_to_mentions(self):
-        if not self.me: return
-        try:
-            params = {"id": self.me.id, "max_results": 10}
-            if self.last_mention_id: 
-                params["since_id"] = self.last_mention_id
-            
-            mentions = twitter.get_users_mentions(**params)
-            if not mentions or not mentions.data: return
-
-            for tweet in sorted(mentions.data, key=lambda x: x.id):
-                if tweet.author_id == self.me.id: continue
-                
-                txt = tweet.text.upper()
-                if any(w in txt for w in ["MAYA", "NE OLUR", "SKOR", "SUI", "ALINIR MI"]):
-                    words = tweet.text.split()
-                    coin = next((w for w in words if w.startswith('$') or w.isupper()), "bu coin")
-                    reply = self.get_maya_score(coin)
-                else:
-                    res = client_ai.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "system", "content": self.system_prompt}, {"role": "user", "content": tweet.text}])
-                    reply = res.choices[0].message.content.strip()
-
-                twitter.create_tweet(text=reply[:280], in_reply_to_tweet_id=tweet.id)
-                self.save_last_id(tweet.id)
-                time.sleep(5)
-        except Exception as e: logger.error(f"Hata: {e}")
+            mentions = self.twitter_client.get_users_mentions(id=self.bot_id)
+            if mentions.data:
+                for tweet in mentions.data:
+                    # Burada normalde 'since_id' kontrolü yapılır ama basitlik için geçiyoruz
+                    logger.info(f"Yeni tweet yakalandı: {tweet.text}")
+                    # Yanıt verme mantığı buraya eklenebilir
+        except Exception as e:
+            logger.error(f"Mention kontrol hatası: {e}")
 
     def run(self):
-        scheduler = BackgroundScheduler()
-        scheduler.add_job(lambda: twitter.create_tweet(text="Sabah-ı şerifleriniz hayrolsun cemaat! Eşeği doyurduk, göle bakıyoruz. Ya tutarsa!"), 'cron', hour=9, minute=0)
-        scheduler.add_job(lambda: twitter.create_tweet(text=self.get_maya_score("Airdrop")), 'cron', day_of_week='tue,thu', hour=14, minute=0)
-        scheduler.add_job(lambda: twitter.create_tweet(text=self.get_heybe_report()), 'cron', day_of_week='sun', hour=21, minute=0)
-        
-        scheduler.start()
-        logger.info("Hoca döngüye girdi, mentionları bekliyor...")
+        """Botu ana döngüye sokar."""
+        logger.info("Nasreddin Hoca devriye geziyor...")
         while True:
-            self.reply_to_mentions()
-            time.sleep(120)
+            self.mentionlari_kontrol_et()
+            time.sleep(60) # 1 dakikada bir kontrol et
 
-# ========= ANA ÇALIŞTIRMA =========
 if __name__ == "__main__":
-    # 1. Önce Moltlets dünyasına giriş yapıp linki alıyoruz
-    # Not: Linki bir kez alıp doğruladıktan sonra bu satırı yorum satırı yapabilirsin (#)
-    moltlets_dunyasına_gir("Nasreddin Hoca", "Gülümseten ve düşündüren bilge.")
+    # 1. Önce Moltlets dünyasına girmeyi dene (Hata alsa da devam eder)
+    moltlets_dunyasına_gir(
+        "Nasreddin Hoca", 
+        "Kripto dünyasında eşeğine ters binen, hem güldüren hem düşündüren bilge."
+    )
     
-    # 2. Sonra Twitter botunu başlatıyoruz
-    KriptoHocaUltimate().run()
+    # 2. Sonra Twitter botunu başlat
+    bot = NasreddinHocaBot()
+    if bot.bot_id:
+        bot.run()
+    else:
+        logger.error("Bot başlatılamadı, API anahtarlarını kontrol et!")
