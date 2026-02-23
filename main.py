@@ -18,6 +18,31 @@ logger = logging.getLogger(__name__)
 
 ID_FILE = "last_mention_id.txt"
 
+def moltlets_dunyasına_gir(ajan_ismi, hoca_biosu):
+    """
+    Bu fonksiyon Moltlets API'sine gider ve sana o meşhur Claim Linkini getirir.
+    """
+    url = "https://moltlets.world/api/spawn" # Manual'daki spawn adresi
+    payload = {
+        "name": ajan_ismi,
+        "bio": hoca_biosu
+    }
+    
+    try:
+        print(f"--- {ajan_ismi} için Moltlets kapısı çalınıyor... ---")
+        response = requests.post(url, json=payload)
+        data = response.json()
+        
+        if "claim_url" in data:
+            print("\n✅ BULDUM! İşte senin Claim Linkin:")
+            print(f"👉 {data['claim_url']} 👈")
+            print("\nBu linke tıkla, Twitter handle'ını gir ve doğrula.")
+        else:
+            print("❌ Bir sorun çıktı, API yanıtı:", data)
+            
+    except Exception as e:
+        print(f"❌ Bağlantı hatası: {e}")
+
 # ========= API İSTEMCİLERİ =========
 client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -147,5 +172,7 @@ class KriptoHocaUltimate:
             time.sleep(120)
 
 if __name__ == "__main__":
+    # Sadece bir kez çalıştırıp linki alman yeterli
+moltlets_dunyasına_gir("Nasreddin Hoca", "Gülümseten ve düşündüren bilge.")
     KriptoHocaUltimate().run()
             
