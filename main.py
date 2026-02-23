@@ -1,115 +1,109 @@
 import os
 import time
-import logging
 import requests
-import tweepy
-from openai import OpenAI
+import json
+import random
+from threading import Thread
 
-# --- LOGLAMA AYARLARI ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# --- API BAĞLANTILARI (Environment Variables) ---
-# Render üzerinde bu isimlerle tanımladığından emin ol!
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# --- AYARLAR (Environment Variables) ---
+# Render veya yerel bilgisayarında bu değişkenleri tanımlamalısın
 TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
 TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET")
 TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
-TWITTER_ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
+TWITTER_ACCESS_TOKEN_SECRET = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 
-# OpenAI İstemcisi
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-def moltlets_dunyasına_gir(ajan_ismi, hoca_biosu):
-    """Moltlets API'sine bağlanır, hata alırsa botu durdurmaz."""
-    url = "https://moltlets.world/api/spawn"
-    payload = {"name": ajan_ismi, "bio": hoca_biosu}
-    
-    try:
-        logger.info(f"--- {ajan_ismi} için Moltlets kapısı çalınıyor... ---")
-        response = requests.post(url, json=payload, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if "claim_url" in data:
-                print(f"\n✅ MOLTLETS BAŞARILI! Linkin: {data['claim_url']}\n")
-                return True
-        else:
-            # Destan gibi hata almamak için sadece durum kodunu yazdırıyoruz
-            logger.warning(f"⚠️ Moltlets şu an yanıt vermiyor (Hata Kodu: {response.status_code}). Twitter moduna geçiliyor...")
-    except Exception as e:
-        logger.error(f"Moltlets bağlantı hatası: {e}")
-    return False
+# Moltlets Bilgileri (Kayıttan sonra burayı dolduracaksın)
+MOLTLETS_AGENT_ID = os.getenv("MOLTLETS_AGENT_ID")
+MOLTLETS_API_KEY = os.getenv("MOLTLETS_API_KEY")
 
 class NasreddinHocaBot:
     def __init__(self):
-        # Twitter API v2 Bağlantısı
-        self.twitter_client = tweepy.Client(
-            bearer_token=TWITTER_BEARER_TOKEN,
-            consumer_key=TWITTER_API_KEY,
-            consumer_secret=TWITTER_API_SECRET,
-            access_token=TWITTER_ACCESS_TOKEN,
-            access_token_secret=TWITTER_ACCESS_SECRET
-        )
-        self.bot_id = None
+        self.name = "Nasreddin_Hoca_AI"
+        self.bio = "Kripto dünyasında eşeğine ters binen, hem güldüren hem düşündüren bilge. Akçe peşinde değil, akıl peşinde!"
+        
+    # --- BÖLÜM 1: MOLTLETS KAYIT FONKSİYONU ---
+    def moltlets_kayit_ol(self):
+        url = "https://moltlets.world/api/manual"
+        payload = {
+            "name": self.name,
+            "bio": self.bio,
+            "personality": ["Esprili", "Bilge", "İğneleyici", "Meraklı"],
+            "appearance": {
+                "color": "#3498db",
+                "variant": "moltlet",
+                "hat": "tophat",
+                "accessories": "glasses"
+            }
+        }
         try:
-            me = self.twitter_client.get_me()
-            self.bot_id = me.data.id
-            logger.info(f"Bot aktif! İsim: {me.data.name}")
+            print("🚀 Hoca Moltlets kapısına dayandı, kayıt isteği gönderiliyor...")
+            res = requests.post(url, json=payload, timeout=10)
+            if res.status_code == 200:
+                data = res.json()
+                print(f"\n✅ KAYIT BAŞLATILDI!")
+                print(f"🔗 ŞU LİNKE GİT VE TWITTER DOĞRULAMASI YAP: {data.get('claimUrl')}")
+                print(f"🔑 CLAIM TOKEN (Sorgulama için): {data.get('claimToken')}")
+                print("\n⚠️ Onay aldıktan sonra Agent ID ve API Key'i Environment Variables'a ekle!")
+                return True
+            else:
+                print(f"❌ Kayıt hatası: {res.status_code} - {res.text}")
         except Exception as e:
-            logger.error(f"Twitter bağlantı hatası: {e}")
+            print(f"💥 Moltlets bağlantı hatası: {e}")
+        return False
 
-    def ai_yanit_olustur(self, tweet_metni, kullanici_adi):
-        """Nasreddin Hoca kişiliğiyle yanıt üretir."""
-        sistem_mesaji = (
-            "Sen 21. yüzyılda yaşayan, kripto paralardan anlayan Nasreddin Hoca'sın. "
-            "Esprili, bilge ve hafif iğneleyici bir dil kullan. Yanıtların kısa ve öz olsun. "
-            "Asla 'Nasreddin Hoca:' gibi ön ekler kullanma. Doğrudan söze gir."
-        )
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": sistem_mesaji},
-                    {"role": "user", "content": f"@{kullanici_adi} şunu dedi: {tweet_metni}. Ona bir hoca cevabı ver."}
-                ],
-                max_tokens=150
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            logger.error(f"AI Yanıt Hatası: {e}")
-            return "Evlat, zihnim biraz karışık, sonra gel hele..."
+    # --- BÖLÜM 2: MOLTLETS OTONOM YAŞAM DÖNGÜSÜ ---
+    def moltlets_yasami(self):
+        if not MOLTLETS_AGENT_ID or not MOLTLETS_API_KEY:
+            print("⏳ Moltlets API anahtarları eksik. Otonom yaşam başlatılamadı.")
+            return
 
-    def mentionlari_kontrol_et(self):
-        """Gelen mentionları kontrol eder ve yanıtlar."""
-        try:
-            mentions = self.twitter_client.get_users_mentions(id=self.bot_id)
-            if mentions.data:
-                for tweet in mentions.data:
-                    # Burada normalde 'since_id' kontrolü yapılır ama basitlik için geçiyoruz
-                    logger.info(f"Yeni tweet yakalandı: {tweet.text}")
-                    # Yanıt verme mantığı buraya eklenebilir
-        except Exception as e:
-            logger.error(f"Mention kontrol hatası: {e}")
+        base_url = f"https://moltlets.world/api/agents/{MOLTLETS_AGENT_ID}/act"
+        headers = {"Authorization": f"Bearer {MOLTLETS_API_KEY}", "Content-Type": "application/json"}
+        
+        actions = [
+            {"action": "wander"},
+            {"action": "chop"},
+            {"action": "interact", "interactionType": "fish"},
+            {"action": "emote", "emoji": "wave"}
+        ]
 
-    def run(self):
-        """Botu ana döngüye sokar."""
-        logger.info("Nasreddin Hoca devriye geziyor...")
+        print("👳‍♂️ Hoca Moltlets dünyasında uyanıyor...")
         while True:
-            self.mentionlari_kontrol_et()
-            time.sleep(60) # 1 dakikada bir kontrol et
+            action = random.choice(actions)
+            try:
+                requests.post(base_url, json=action, headers=headers, timeout=5)
+                print(f"🎬 Moltlets Aksiyonu: {action['action']} yapıldı.")
+            except:
+                pass
+            time.sleep(random.randint(5, 10)) # 5-10 saniye bekle
 
+    # --- BÖLÜM 3: TWITTER PAYLAŞIM DÖNGÜSÜ ---
+    def twitter_paylasimi(self):
+        print("🐦 Twitter botu aktif hale getiriliyor...")
+        # Burada senin mevcut Twitter paylaşım kodun (Tweepy vb.) çalışacak
+        while True:
+            print("📢 Hoca bir tweet hazırlıyor: 'Ya tutarsa?'")
+            # tweet_at("Kripto gölüne maya çalmaya geldik...")
+            time.sleep(3600) # Saatte bir tweet
+
+# --- ANA ÇALIŞTIRICI ---
 if __name__ == "__main__":
-    # 1. Önce Moltlets dünyasına girmeyi dene (Hata alsa da devam eder)
-    moltlets_dunyasına_gir(
-        "Nasreddin Hoca", 
-        "Kripto dünyasında eşeğine ters binen, hem güldüren hem düşündüren bilge."
-    )
-    
-    # 2. Sonra Twitter botunu başlat
-    bot = NasreddinHocaBot()
-    if bot.bot_id:
-        bot.run()
+    hoca = NasreddinHocaBot()
+
+    # 1. Eğer API Key yoksa kayıt olmaya çalış
+    if not MOLTLETS_API_KEY:
+        hoca.moltlets_kayit_ol()
+        print("\n🛑 Kayıt linki yukarıda. Lütfen doğrulamayı yapıp API anahtarlarını alana kadar bekleyin.")
     else:
-        logger.error("Bot başlatılamadı, API anahtarlarını kontrol et!")
+        # 2. API Key varsa hem Twitter'ı hem Moltlets'i aynı anda başlat (Thread kullanarak)
+        print("🌟 Tüm sistemler başlatılıyor...")
+        
+        moltlets_thread = Thread(target=hoca.moltlets_yasami)
+        twitter_thread = Thread(target=hoca.twitter_paylasimi)
+
+        moltlets_thread.start()
+        twitter_thread.start()
+
+        moltlets_thread.join()
+        twitter_thread.join()
