@@ -18,30 +18,39 @@ logger = logging.getLogger(__name__)
 
 ID_FILE = "last_mention_id.txt"
 
+# ========= MOLTLETS DÜNYASINA GİRİŞ FONKSİYONU =========
 def moltlets_dunyasına_gir(ajan_ismi, hoca_biosu):
     """
     Bu fonksiyon Moltlets API'sine gider ve sana o meşhur Claim Linkini getirir.
     """
-    url = "https://moltlets.world/api/spawn" # Manual'daki spawn adresi
+    url = "https://moltlets.world/api/spawn" 
     payload = {
         "name": ajan_ismi,
         "bio": hoca_biosu
     }
     
     try:
-        print(f"--- {ajan_ismi} için Moltlets kapısı çalınıyor... ---")
-        response = requests.post(url, json=payload)
-        data = response.json()
+        logger.info(f"--- {ajan_ismi} için Moltlets kapısı çalınıyor... ---")
+        response = requests.post(url, json=payload, timeout=15)
         
-        if "claim_url" in data:
-            print("\n✅ BULDUM! İşte senin Claim Linkin:")
-            print(f"👉 {data['claim_url']} 👈")
-            print("\nBu linke tıkla, Twitter handle'ını gir ve doğrula.")
+        # API bazen JSON yerine hata dönebilir, kontrol edelim
+        if response.status_code == 200 or response.status_code == 201:
+            data = response.json()
+            if "claim_url" in data:
+                print("\n" + "="*50)
+                print("✅ MOLTLETS AJANI OLUŞTURULDU!")
+                print(f"👉 CLAIM LINKIN: {data['claim_url']}")
+                print("="*50)
+                print("Bu linke tıkla, Twitter handle'ını gir ve doğrula.\n")
+                return True
+            else:
+                logger.warning(f"Link anahtarı yanıtta bulunamadı: {data}")
         else:
-            print("❌ Bir sorun çıktı, API yanıtı:", data)
+            logger.error(f"Moltlets API Hatası (Kod {response.status_code}): {response.text}")
             
     except Exception as e:
-        print(f"❌ Bağlantı hatası: {e}")
+        logger.error(f"Moltlets bağlantı hatası: {e}")
+    return False
 
 # ========= API İSTEMCİLERİ =========
 client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -59,14 +68,13 @@ class KriptoHocaUltimate:
         self.me = None
         try:
             self.me = twitter.get_me().data
-            logger.info(f"Hoca Kürsüde: @{self.me.username}")
+            if self.me:
+                logger.info(f"Hoca Kürsüde: @{self.me.username}")
         except Exception as e:
-            logger.error(f"Giriş Hatası: {e}")
+            logger.error(f"Twitter Giriş Hatası: {e}")
 
-        # Başlangıçta hafızayı Twitter'dan tazele
         self.last_mention_id = self.get_last_tweet_id_from_profile()
         
-        # Hoca'nın Hayali Heybesi
         self.portfolio = {
             "BTC": {"amount": 0.1, "buy_price": 68000.0},
             "ETH": {"amount": 1.5, "buy_price": 1970.0},
@@ -81,15 +89,12 @@ class KriptoHocaUltimate:
             "SUI sorulunca mutlaka su/göl esprileri yap. Yatırım tavsiyesi değil, nasip tavsiyesi ver."
         )
 
-    # --- KRİTİK HAFIZA FONKSİYONU (SPAM ENGELLEYİCİ) ---
     def get_last_tweet_id_from_profile(self):
-        """Render sıfırlansa bile Hoca'nın en son attığı tweeti bulup oradan devam etmesini sağlar."""
+        if not self.me: return None
         try:
             my_tweets = twitter.get_users_tweets(id=self.me.id, max_results=5)
             if my_tweets and my_tweets.data:
-                last_id = my_tweets.data[0].id
-                logger.info(f"Son tweet bulundu, hafıza bu ID'den başlıyor: {last_id}")
-                return last_id
+                return my_tweets.data[0].id
             return None
         except Exception as e:
             logger.error(f"Profil hafızası çekilemedi: {e}")
@@ -101,7 +106,6 @@ class KriptoHocaUltimate:
             with open(ID_FILE, "w") as f: f.write(str(tweet_id))
         except: pass
 
-    # --- PİYASA VERİLERİ ---
     def get_coin_price(self, symbol):
         try:
             sym = symbol.upper().replace("$", "").replace("USDT", "") + "USDT"
@@ -109,7 +113,6 @@ class KriptoHocaUltimate:
             return float(res['price'])
         except: return None
 
-    # --- ÖZELLİKLER ---
     def get_maya_score(self, coin_name):
         seed = f"{coin_name.upper()}{datetime.now().strftime('%Y%m%d')}"
         score = int(hashlib.md5(seed.encode()).hexdigest(), 16) % 100
@@ -129,7 +132,6 @@ class KriptoHocaUltimate:
         res = client_ai.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "system", "content": self.system_prompt}, {"role": "user", "content": prompt}])
         return f"💰 HEYBE RAPORU (%{change:.2f})\n\n{res.choices[0].message.content.strip()[:240]}"
 
-    # --- ETKİLEŞİM DÖNGÜSÜ ---
     def reply_to_mentions(self):
         if not self.me: return
         try:
@@ -159,20 +161,21 @@ class KriptoHocaUltimate:
 
     def run(self):
         scheduler = BackgroundScheduler()
-        # Sabah Selamı 09:00
         scheduler.add_job(lambda: twitter.create_tweet(text="Sabah-ı şerifleriniz hayrolsun cemaat! Eşeği doyurduk, göle bakıyoruz. Ya tutarsa!"), 'cron', hour=9, minute=0)
-        # Salı & Perşembe Airdrop Radarı 14:00
         scheduler.add_job(lambda: twitter.create_tweet(text=self.get_maya_score("Airdrop")), 'cron', day_of_week='tue,thu', hour=14, minute=0)
-        # Pazar 21:00 Heybe Raporu
         scheduler.add_job(lambda: twitter.create_tweet(text=self.get_heybe_report()), 'cron', day_of_week='sun', hour=21, minute=0)
         
         scheduler.start()
+        logger.info("Hoca döngüye girdi, mentionları bekliyor...")
         while True:
             self.reply_to_mentions()
             time.sleep(120)
 
+# ========= ANA ÇALIŞTIRMA =========
 if __name__ == "__main__":
-    # Sadece bir kez çalıştırıp linki alman yeterli
-moltlets_dunyasına_gir("Nasreddin Hoca", "Gülümseten ve düşündüren bilge.")
+    # 1. Önce Moltlets dünyasına giriş yapıp linki alıyoruz
+    # Not: Linki bir kez alıp doğruladıktan sonra bu satırı yorum satırı yapabilirsin (#)
+    moltlets_dunyasına_gir("Nasreddin Hoca", "Gülümseten ve düşündüren bilge.")
+    
+    # 2. Sonra Twitter botunu başlatıyoruz
     KriptoHocaUltimate().run()
-            
