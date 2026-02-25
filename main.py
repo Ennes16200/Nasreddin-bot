@@ -1,122 +1,146 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import os
 import time
+import logging
 import requests
-import json
-import random
+import tweepy
+from openai import OpenAI
 from threading import Thread
 
-# --- AYARLAR (Environment Variables) ---
-# Render veya yerel bilgisayarınızda bu değişkenleri tanımlayın
-TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
-TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET")
-TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
-TWITTER_ACCESS_TOKEN_SECRET = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
+# ========= AYARLAR VE LOGLAMA =========
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# Moltlets Bilgileri (Kayıttan sonra Render'a ekleyeceksiniz)
-MOLTLETS_AGENT_ID = os.getenv("MOLTLETS_AGENT_ID")
-MOLTLETS_API_KEY = os.getenv("MOLTLETS_API_KEY")
+# Render hafıza dosyaları
+ID_FILE = "last_mention_id.txt"
+PRICE_FILE = "last_price.txt"
+
+# ========= API İSTEMCİLERİ =========
+client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+twitter = tweepy.Client(
+    bearer_token=os.getenv("TWITTER_BEARER"),
+    consumer_key=os.getenv("TWITTER_API_KEY"),
+    consumer_secret=os.getenv("TWITTER_API_SECRET"),
+    access_token=os.getenv("TWITTER_ACCESS_TOKEN"),
+    access_token_secret=os.getenv("TWITTER_ACCESS_SECRET"),
+)
 
 class NasreddinHocaBot:
     def __init__(self):
-        # İsimde boşluk ve özel karakter olmamasına dikkat (Sunucu hatasını önler)
-        self.agent_name = "NasreddinHocaAI" 
-        self.bio = "Kripto dunyasinda esegine ters binen, hem gulduren hem dusunduren bilge."
-        self.session = requests.Session()
-        self.session.headers.update({
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json"
-        })
-
-    # --- BÖLÜM 1: MOLTLETS KAYIT (MANUAL SPAWN) ---
-    def moltlets_kayit_ol(self):
-        url = "https://moltlets.world/api/manual"
-        payload = {
-            "name": self.agent_name,
-            "bio": self.bio,
-            "personality": ["Funny", "Wise", "Sarcastic", "Curious"],
-            "appearance": {
-                "color": "#3498db",
-                "variant": "moltlet",
-                "hat": "tophat",
-                "accessories": "glasses"
-            }
-        }
-        
+        self.last_mention_id = self.load_data(ID_FILE)
+        self.last_btc_price = self.load_data(PRICE_FILE, is_float=True)
+        self.me = None
         try:
-            print(f"🚀 {self.agent_name} Moltlets kapısını çalıyor...")
-            # data=json.dumps kullanarak en saf JSON formatını gönderiyoruz
-            res = self.session.post(url, data=json.dumps(payload), timeout=20)
-            
-            if res.status_code == 200 and res.text.strip():
-                data = res.json()
-                print("\n" + "="*40)
-                print("✅ BAŞARILI! HOCA DÜNYAYA ADIM ATTI.")
-                print(f"🔗 ŞİMDİ BU LİNKE GİT: {data.get('claimUrl')}")
-                print(f"🔑 CLAIM TOKEN (Sakla): {data.get('claimToken')}")
-                print("="*40)
-                print("\n⚠️ Onay aldıktan sonra Agent ID ve API Key'i Render ayarlarına ekle!")
-                return True
-            else:
-                print(f"❌ Sunucu Yanıt Vermedi veya Hata Döndü (Kod: {res.status_code})")
-                print(f"Ham Yanıt: {res.text}")
+            self.me = twitter.get_me().data
+            logger.info(f"Hoca Kürsüde: @{self.me.username}")
         except Exception as e:
-            print(f"💥 Bağlantı hatası: {e}")
-        return False
+            logger.error(f"Twitter Giriş Hatası: {e}")
 
-    # --- BÖLÜM 2: MOLTLETS OTONOM YAŞAM ---
-    def moltlets_yasami(self):
-        if not MOLTLETS_AGENT_ID or not MOLTLETS_API_KEY:
-            print("⏳ Moltlets API anahtarları bekleniyor... Otonom yaşam askıda.")
-            return
-
-        base_url = f"https://moltlets.world/api/agents/{MOLTLETS_AGENT_ID}/act"
-        headers = {"Authorization": f"Bearer {MOLTLETS_API_KEY}"}
-        
-        actions = [
-            {"action": "wander"},
-            {"action": "chop"},
-            {"action": "interact", "interactionType": "fish"},
-            {"action": "emote", "emoji": "wave"}
-        ]
-
-        print(f"👳‍♂️ Hoca Moltlets dünyasında (ID: {MOLTLETS_AGENT_ID}) aktif!")
-        while True:
-            action = random.choice(actions)
+    def load_data(self, filename, is_float=False):
+        if os.path.exists(filename):
             try:
-                res = self.session.post(base_url, json=action, headers=headers, timeout=10)
-                print(f"🎬 Aksiyon: {action['action']} | Durum: {res.status_code}")
-            except Exception as e:
-                print(f"⚠️ Aksiyon hatası: {e}")
-            
-            # Sunucuyu yormamak için 10-20 saniye arası rastgele bekleme
-            time.sleep(random.randint(10, 20))
+                with open(filename, "r") as f:
+                    val = f.read().strip()
+                    return float(val) if is_float else int(val)
+            except: return None
+        return None
 
-    # --- BÖLÜM 3: TWITTER DÖNGÜSÜ ---
-    def twitter_dongusu(self):
-        print("🐦 Twitter botu arka planda hazır bekliyor...")
+    def save_data(self, filename, value):
+        try:
+            with open(filename, "w") as f:
+                f.write(str(value))
+        except: pass
+
+    def get_market_data(self):
+        """Binance'den BTC fiyatını çeker."""
+        try:
+            res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=10).json()
+            price = float(res['price'])
+            return price
+        except: return None
+
+    def check_market_movement(self):
+        """%5 hareket kontrolü."""
+        current_price = self.get_market_data()
+        if not current_price: return
+
+        if self.last_btc_price:
+            change = ((current_price - self.last_btc_price) / self.last_btc_price) * 100
+            if abs(change) >= 5.0:
+                yon = "fırladı" if change > 0 else "çakıldı"
+                prompt = f"BTC fiyatı %{change:.2f} {yon}! Şu an {current_price} USD. Nasreddin Hoca olarak halka bir ibretlik yorum yap."
+                self.post_tweet(prompt)
+                self.save_data(PRICE_FILE, current_price)
+                self.last_btc_price = current_price
+        else:
+            self.save_data(PRICE_FILE, current_price)
+            self.last_btc_price = current_price
+
+    def post_tweet(self, prompt):
+        try:
+            response = client_ai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "system", "content": "Sen Nasreddin Hoca'sın."}, {"role": "user", "content": prompt}]
+            )
+            text = response.choices[0].message.content.strip()
+            twitter.create_tweet(text=text)
+            logger.info(f"Tweet Atıldı: {text}")
+        except Exception as e:
+            logger.error(f"Tweet Hatası: {e}")
+
+    def check_mentions(self):
+        """Mentionları kontrol eder ve yanıtlar."""
+        if not self.me: return
+        try:
+            # 1. Kendi son yanıtlarımızı çek (Mükerrer yanıt engeli)
+            my_replies = twitter.get_users_tweets(id=self.me.id, max_results=20, tweet_fields=["referenced_tweets"])
+            answered_ids = []
+            if my_replies and my_replies.data:
+                for r in my_replies.data:
+                    if r.referenced_tweets:
+                        for ref in r.referenced_tweets:
+                            if ref.type == "replied_to":
+                                answered_ids.append(ref.id)
+
+            # 2. Gelen mentionları çek
+            params = {"id": self.me.id, "max_results": 10}
+            if self.last_mention_id:
+                params["since_id"] = self.last_mention_id
+
+            mentions = twitter.get_users_mentions(**params)
+            if not mentions or not mentions.data: return
+
+            for tweet in sorted(mentions.data, key=lambda x: x.id):
+                if tweet.id in answered_ids:
+                    continue
+
+                logger.info(f"Yanıtlanıyor: {tweet.text}")
+                prompt = f"Kullanıcı: '{tweet.text}'. Nasreddin Hoca olarak kısa, bilgece ve komik bir cevap ver."
+                
+                response = client_ai.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "system", "content": "Sen Nasreddin Hoca'sın."}, {"role": "user", "content": prompt}]
+                )
+                reply = response.choices[0].message.content.strip()
+                
+                twitter.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
+                self.save_data(ID_FILE, tweet.id)
+                self.last_mention_id = tweet.id
+                time.sleep(5)
+
+        except Exception as e:
+            logger.error(f"Mention Hatası: {e}")
+
+    def run(self):
+        logger.info("Sistem başlatıldı...")
         while True:
-            # Buraya mevcut tweet atma fonksiyonunu entegre edebilirsin
-            # print("📢 Tweet atılıyor...")
-            time.sleep(3600) # Saatte bir kontrol
+            self.check_mentions()
+            self.check_market_movement()
+            time.sleep(60) # 1 dakikada bir kontrol
 
-# --- ANA ÇALIŞTIRICI ---
 if __name__ == "__main__":
     hoca = NasreddinHocaBot()
-
-    # Eğer API Key yoksa kayıt modunda başla
-    if not MOLTLETS_API_KEY:
-        hoca.moltlets_kayit_ol()
-        print("\n💡 Kayıt işlemini tamamlayıp API anahtarlarını alana kadar bekleyin.")
-    else:
-        # API Key varsa hem Twitter hem Moltlets aynı anda çalışsın
-        print("🌟 Tüm sistemler devreye alınıyor...")
-        
-        t1 = Thread(target=hoca.moltlets_yasami)
-        t2 = Thread(target=hoca.twitter_dongusu)
-
-        t1.start()
-        t2.start()
-
-        t1.join()
-        t2.join()
+    hoca.run()
